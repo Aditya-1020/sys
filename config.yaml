@@ -1,0 +1,19 @@
+# LibreLane config - systolic
+# Start conservative; tighten CLOCK_PERIOD only after first clean run.
+DESIGN_NAME: "systolic"
+VERILOG_FILES: dir::rtl/*.sv
+
+CLOCK_PORT: "clk"
+CLOCK_PERIOD: 15.0          # ns - ~66 MHz starting point on sky130; tighten later
+
+FP_CORE_UTIL: 45            # 40–55 is safe; >65 invites congestion/DRC
+PL_TARGET_DENSITY_PCT: 50
+
+SYNTH_STRATEGY: "AREA 0"    # switch to "DELAY 3" when chasing Fmax
+MAX_FANOUT_CONSTRAINT: 10
+
+# hold fixes at slow corner - uncomment if multicorner report shows hold viols
+# PL_RESIZER_HOLD_SLACK_MARGIN: 0.1
+
+# antenna repair for long nets
+# DIODE_ON_PORTS: "in"

@@ -1,0 +1,26 @@
+# generated
+build/
+runs/
+obj_dir/
+synth/*.json
+synth/*.rpt
+synth/*.v
+results.xml
+
+# waves
+*.vcd
+*.fst
+*.fst.hier
+
+# python
+.venv/
+__pycache__/
+
+# editor
+.*.swp
+.vscode/
+
+pe/
+docs/
+
+mk/formal.mk
