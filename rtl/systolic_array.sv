@@ -27,9 +27,7 @@ module systolic_array #(
     localparam INNER_DIM = MATRIX_SIZE; // K MACs per PE
     localparam FILL_CYCLES = (ARRAY_ROWS - 1) + (ARRAY_COLS - 1);  // 2
     localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM; // 4
-    
     localparam TOTAL_DRAIN_CYCLES = 1;
-
     localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
 
     // CSR address map
@@ -61,6 +59,31 @@ module systolic_array #(
     wire start_pulse = csr_wr_ctrl && csr_wdata[CTRL_START_BIT];
     wire abort_pulse = csr_wr_ctrl && csr_wdata[CTRL_ABORT_BIT];
 
+    wire status_busy = (current_state != IDLE);
+    wire done_set = (current_state == DRAIN) && (next_state == DONE);
+    wire done_w1c = csr_wr_status && csr_wdata[STATUS_DONE_BIT];
+    
+    // signed control pe
+    logic pe_ctrl_signed_r; // note to self (check for its fanout during librelane flow)
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            pe_ctrl_signed_r <= 1'd0;
+        end else if (csr_wr_ctrl) begin
+            pe_ctrl_signed_r <= csr_wdata[CTRL_SIGNED_BIT];
+        end
+    end
 
+    logic done_r;
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            done_r <= 1'd0;
+        end else if (done_set) begin
+            done_r <= 1'd1;
+        end else if (done_w1c) begin
+            done_r <= 1'd0;
+        end
+    end
+
+    
 endmodule
 `default_nettype wire
