@@ -1,130 +1,66 @@
-/*
-- Activations (left edge)
-    - delay row 0 = 0 cycle
-    - delay row 1 = 1 cycle
-    - N = n cycle delay
-- weights: weights vertical streamed and registed duign LOAD
-    - no skew just pushed the rows down in N cycles
-- output: 
-    - col 0 = N cycles ouput
-    - col n-1 = last to output
-    - col 0 dealyed n-1 cycles and col n-1 delayed 0 cycles for output at same time
-*/
-
 `default_nettype none
 `timescale 1ps/1ps
 
 module systolic_array #(
-    parameter integer pe_n = 2, // array dimension
-    parameter integer pe_data_w = 8 // activation/weight width
+    parameter MATRIX_SIZE = 2,
+    parameter DATA_WIDTH = 8,
+    parameter RESULT_WIDTH = 32,
+    parameter CSR_ADDR_W = 8
 )(
-    input wire clk,
-    input wire rstn,
+    input logic clk,
+    input logic rstn, 
 
-    input wire i_acc_clear_pe,
+    // csr strobe
+    input logic csr_wr,
+    input logic [CSR_ADDR_W-1:0] csr_addr,
+    input logic [31:0] csr_wdata,
+    output logic [31:0] csr_rdata,
 
-    // weight fed from top edge
-    input wire i_w_load,
-    input logic signed [(pe_n*pe_data_w)-1:0] i_w_row,
-    
-    // activations fed from left edge
-    input logic signed [(pe_n*pe_data_w)-1:0] i_a,
-    output logic signed [(pe_n * ( (2 * pe_data_w) + $clog2(pe_n) ))-1:0] o_c
+    input logic [MATRIX_SIZE*DATA_WIDTH-1:0] i_a_feed, // col for a inputs
+    input logic [MATRIX_SIZE*DATA_WIDTH-1:0] i_b_feed, // row for b inputs
+    output logic [MATRIX_SIZE*MATRIX_SIZE*RESULT_WIDTH-1:0] o_result,
+    output logic o_result_valid
 );
-    localparam integer pe_acc_w = (2 * pe_data_w) + $clog2(pe_n); // accumulator width
-    localparam integer pe_lat = (2*pe_n)-1; // total pipeline latecy
-
-    wire signed [pe_data_w-1:0] weight_w [pe_n+1][pe_n];
-    wire signed [pe_data_w-1:0] act_w [pe_n][pe_n+1];
-    wire signed [pe_acc_w-1:0] psum_w [pe_n+1][pe_n];
-
-    logic signed [pe_data_w-1:0] a_skew [pe_n]; // input skew for left edge activations
-
-    // input skew
-    generate
-        for (genvar r = 0; r < pe_n; r = r + 1) begin : gen_a_skew
-            if (r == 0) begin
-                // no delay r=0
-                assign a_skew[r] = signed'(i_a[r*pe_data_w +: pe_data_w]);
-            end else begin
-                // r = r cycle delay
-                logic signed [pe_data_w-1:0] delay_r [r:1];
-                always_ff @(posedge clk or negedge rstn) begin
-                    if (!rstn) begin
-                        for (int i = 1; i <= r; i = i + 1) begin
-                            delay_r[i] <= '0;
-                        end
-                    end else begin
-                        delay_r[1] <= signed'(i_a[r*pe_data_w +: pe_data_w]);
-                        for (int i = 2; i <= r; i = i + 1) begin
-                            delay_r[i] <= delay_r[i-1];
-                        end
-                    end
-                end
-                assign a_skew[r] = delay_r[r];
-            end
-            assign act_w[r][0] = a_skew[r];
-        end
-    endgenerate
-
-    // top edge
-    generate
-        for (genvar c = 0; c < pe_n; c=c+1) begin : gen_top_edge
-            assign weight_w[0][c] = signed'(i_w_row[c*pe_data_w +: pe_data_w]);
-            assign psum_w[0][c] = '0;
-        end
-    endgenerate
-
-    // pe array
-    generate
-        for (genvar r = 0; r < pe_n; r = r + 1) begin : pe_row
-            for (genvar c = 0; c < pe_n; c = c + 1) begin : pe_col
-                pe #(
-                    .pe_data_w(pe_data_w),
-                    .pe_acc_w(pe_acc_w)
-                    ) u_pe (
-                        .clk    (clk),
-                        .rstn   (rstn),
-                        .i_w_load(i_w_load),
-                        .i_acc_clear(i_acc_clear_pe), // need to handle this in fsm though gate eveyrthing during clear count dead?
-                        .i_w    (weight_w[r][c]),
-                        .o_w    (weight_w[r+1][c]),
-                        .i_a    (act_w[r][c]),
-                        .o_a    (act_w[r][c+1]),
-                        .i_psum (psum_w[r][c]),
-                        .o_psum (psum_w[r+1][c])
-                );
-            end
-        end
-    endgenerate
-
-    // output deskew
-    logic signed [pe_acc_w-1:0] c_deskew [pe_n]; // bottom edge psums
-    generate
-        for (genvar c = 0; c < pe_n; c = c+ 1) begin : gen_c_deskew
-            localparam int delay = pe_n - 1 - c; // col n-1 0 delay (col 0 max delay)
-            
-            if (delay == 0) begin
-                assign c_deskew[c] = psum_w[pe_n][c];
-            end else begin
-                logic signed [pe_acc_w-1:0] delay_r [delay:1];
-                always_ff @(posedge clk or negedge rstn) begin
-                    if(!rstn) begin
-                        for (int i= 0; i <= delay; i++) begin
-                            delay_r[i] <= '0;
-                        end
-                    end else begin
-                        delay_r[1] <= psum_w[pe_n][c];
-                        for (int i= 2; i<= delay; i= i+1) begin
-                            delay_r[i] <= delay_r[i-1];
-                        end
-                    end
-                end
-                assign c_deskew[c] = delay_r[delay];
-            end    
-            assign o_c[c*pe_acc_w +: pe_acc_w] = c_deskew[c];
-        end
-    endgenerate
+    localparam ARRAY_ROWS = MATRIX_SIZE;
+    localparam ARRAY_COLS = MATRIX_SIZE;
+    localparam N_PES = ARRAY_ROWS * ARRAY_COLS;
+    localparam INNER_DIM = MATRIX_SIZE; // K MACs per PE
+    localparam FILL_CYCLES = (ARRAY_ROWS - 1) + (ARRAY_COLS - 1);  // 2
+    localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM; // 4
     
+    localparam TOTAL_DRAIN_CYCLES = 1;
+
+    localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
+
+    // CSR address map
+    localparam ADDR_CTRL = 'h00;
+    localparam ADDR_STATUS = 'h04;
+    localparam ADDR_CYCLES = 'h08;
+
+    localparam CTRL_START_BIT = 0;
+    localparam CTRL_SIGNED_BIT = 1;
+    localparam CTRL_ABORT_BIT = 2;
+
+    localparam STATUS_BUSY_BIT = 0;
+    localparam STATUS_DONE_BIT= 1;
+    localparam STATUS_STATE_LSB = 2; // [4:2]
+
+    typedef enum logic [2:0] {
+        IDLE = 3'd0,
+        CLEAR = 3'd1,
+        COMPUTE = 3'd2, 
+        DRAIN = 3'd3,
+        DONE = 3'd4
+    } state_t;
+    state_t current_state, next_state;
+
+    // CSR wr decode
+    wire csr_wr_ctrl = csr_wr && (csr_addr == ADDR_CTRL);
+    wire csr_wr_status = csr_wr && (csr_addr == ADDR_STATUS);
+
+    wire start_pulse = csr_wr_ctrl && csr_wdata[CTRL_START_BIT];
+    wire abort_pulse = csr_wr_ctrl && csr_wdata[CTRL_ABORT_BIT];
+
+
 endmodule
 `default_nettype wire

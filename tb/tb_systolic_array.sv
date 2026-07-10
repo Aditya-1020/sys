@@ -19,7 +19,7 @@ interface dut_if #(
     endclocking
 endinterface
 
-module tb_systolic;
+module tb_systolic_array;
 
     localparam int pe_data_w = 8;
     localparam int pe_n = 2;
@@ -133,7 +133,7 @@ module tb_systolic;
 
     initial begin
         $dumpfile("dump.vcd");
-        $dumpvars(0, tb_systolic);
+        $dumpvars(0, tb_systolic_array);
 
         reset_dut();
 
