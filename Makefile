@@ -12,7 +12,7 @@ V_SIM_SRCS = $(V_RTL) $(SV_TB)
 IVERILOG_FLAGS = -g2012 -Wall
 IVERILOG_OUT   = $(BUILD_DIR)/sim.vvp
 
-TOP      = tb_systolic
+TOP = tb_systolic_array
 SNAPSHOT = $(TOP)_snap
 
 # STA: scripts in scripts/<module>/{synth,sta}.tcl, sdc in constraints/<module>.sdc
