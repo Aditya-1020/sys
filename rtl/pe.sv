@@ -8,6 +8,8 @@ module pe #(
     input wire clk,
     input wire rstn,
     
+    input wire i_acc_clear, // clear accumulator
+
     input wire i_w_load,
     input wire signed [(pe_data_w-1):0] i_w,
     output wire signed [(pe_data_w-1):0] o_w,
@@ -36,7 +38,11 @@ module pe #(
             psum_r <= '0;
         end else begin
             a_r <= i_a;
-            psum_r <= next_psum;
+            if (i_acc_clear && !i_w_load) begin
+                psum_r <= '0;
+            end else if (!i_w_load) begin
+                psum_r <= next_psum;
+            end
         end
     end
 

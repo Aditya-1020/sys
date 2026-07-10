@@ -21,6 +21,8 @@ module systolic_array #(
     input wire clk,
     input wire rstn,
 
+    input wire i_acc_clear_pe,
+
     // weight fed from top edge
     input wire i_w_load,
     input logic signed [(pe_n*pe_data_w)-1:0] i_w_row,
@@ -84,6 +86,7 @@ module systolic_array #(
                         .clk    (clk),
                         .rstn   (rstn),
                         .i_w_load(i_w_load),
+                        .i_acc_clear(i_acc_clear_pe), // need to handle this in fsm though gate eveyrthing during clear count dead?
                         .i_w    (weight_w[r][c]),
                         .o_w    (weight_w[r+1][c]),
                         .i_a    (act_w[r][c]),
