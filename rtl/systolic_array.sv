@@ -4,7 +4,7 @@
 module systolic_array #(
     parameter MATRIX_SIZE = 2,
     parameter DATA_WIDTH = 8,
-    parameter RESULT_WIDTH = 32,
+    parameter RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 17
     parameter CSR_ADDR_W = 8
 )(
     input logic clk,
@@ -26,7 +26,8 @@ module systolic_array #(
     localparam N_PES = ARRAY_ROWS * ARRAY_COLS;
     localparam INNER_DIM = MATRIX_SIZE; // K MACs per PE
     localparam FILL_CYCLES = (ARRAY_ROWS - 1) + (ARRAY_COLS - 1);  // 2
-    localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM; // 4
+    localparam PE_LATENCY = 2;
+    localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY; // 6
     localparam TOTAL_DRAIN_CYCLES = 1;
     localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
 
@@ -52,7 +53,7 @@ module systolic_array #(
     } state_t;
     state_t current_state, next_state;
 
-    // CSR wr decode
+    // CSR write decode
     wire csr_wr_ctrl = csr_wr && (csr_addr == ADDR_CTRL);
     wire csr_wr_status = csr_wr && (csr_addr == ADDR_STATUS);
 
@@ -61,7 +62,7 @@ module systolic_array #(
 
     wire status_busy = (current_state != IDLE);
     wire done_set = (current_state == DRAIN) && (next_state == DONE);
-    wire done_w1c = csr_wr_status && csr_wdata[STATUS_DONE_BIT];
+    wire done_w1c = csr_wr_status && csr_wdata[STATUS_DONE_BIT]; // sticky
     
     // signed control pe
     logic pe_ctrl_signed_r; // note to self (check for its fanout during librelane flow)
@@ -83,6 +84,53 @@ module systolic_array #(
             done_r <= 1'd0;
         end
     end
+
+    logic [COUNT_WIDTH-1:0] cycle_count_r;
+    wire compute_last = (cycle_count_r == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin 
+            cycle_count_r <= '0;
+        end else if (current_state != COMPUTE) begin
+            cycle_count_r <= '0;
+        end else begin
+            cycle_count_r <= cycle_count_r + COUNT_WIDTH'(1);
+        end
+    end
+
+
+    // next state logic
+    always_comb begin
+        next_state = current_state;
+        
+        case (current_state)
+            IDLE: begin
+                if (start_pulse) next_state <= CLEAR;
+            end
+            
+            CLEAR: begin
+                next_state = COMPUTE;
+            end
+
+            COMPUTE: begin
+                if (compute_last) next_state = DRAIN;
+            end
+
+            DRAIN: begin
+                next_state = DONE;
+            end
+
+            DONE: begin
+                next_state = IDLE;
+            end
+            
+            default: next_state = IDLE;
+        endcase
+
+        if (abort_pulse) begin // overrides
+            next_state = IDLE;
+        end
+    end
+
 
     
 endmodule
