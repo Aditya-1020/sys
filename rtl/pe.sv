@@ -29,8 +29,10 @@ module pe #(
     wire signed [DATA_WIDTH:0] b_w = {b_s_bit, b_r};
 
     logic signed [2*DATA_WIDTH+1:0] mult_r;
-    always_ff @(posedge clk) begin
-        if (i_enable) begin
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            mult_r <= '0;
+        end else if (i_enable) begin
             mult_r <= a_w * b_w;
         end
     end
