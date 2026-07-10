@@ -38,6 +38,7 @@ module systolic_array #(
 
     logic signed [pe_data_w-1:0] a_skew [pe_n]; // input skew for left edge activations
 
+    // input skew
     generate
         for (genvar r = 0; r < pe_n; r = r + 1) begin : gen_a_skew
             if (r == 0) begin
@@ -48,7 +49,7 @@ module systolic_array #(
                 logic signed [pe_data_w-1:0] delay_r [r:1];
                 always_ff @(posedge clk or negedge rstn) begin
                     if (!rstn) begin
-                        for (int i = 1; i < r; i = i + 1) begin
+                        for (int i = 1; i <= r; i = i + 1) begin
                             delay_r[i] <= '0;
                         end
                     end else begin
@@ -94,10 +95,10 @@ module systolic_array #(
         end
     endgenerate
 
+    // output deskew
     logic signed [pe_acc_w-1:0] c_deskew [pe_n]; // bottom edge psums
-
     generate
-        for (genvar c= 0; c< pe_n; c= c+ 1) begin : gen_c_deskew
+        for (genvar c = 0; c < pe_n; c = c+ 1) begin : gen_c_deskew
             localparam int delay = pe_n - 1 - c; // col n-1 0 delay (col 0 max delay)
             
             if (delay == 0) begin
@@ -106,7 +107,7 @@ module systolic_array #(
                 logic signed [pe_acc_w-1:0] delay_r [delay:1];
                 always_ff @(posedge clk or negedge rstn) begin
                     if(!rstn) begin
-                        for (int i= 0; i < delay; i++) begin
+                        for (int i= 0; i <= delay; i++) begin
                             delay_r[i] <= '0;
                         end
                     end else begin
