@@ -5,7 +5,6 @@ synth -top pe
 dfflibmap -liberty $libfile
 abc -liberty $libfile
 opt -full -fast
-opt_reduce
 opt_clean
 opt_merge
 stat
