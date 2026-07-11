@@ -74,17 +74,18 @@ module systolic_array #(
         end
     end
 
-    logic done_r;
+    logic status_done;
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            done_r <= 1'd0;
+            status_done <= 1'd0;
         end else if (done_set) begin
-            done_r <= 1'd1;
+            status_done <= 1'd1;
         end else if (done_w1c) begin
-            done_r <= 1'd0;
+            status_done <= 1'd0;
         end
     end
 
+    // compute count increments on compute cycle
     logic [COUNT_WIDTH-1:0] cycle_count_r;
     wire compute_last = (cycle_count_r == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
     always_ff @(posedge clk or negedge rstn) begin
@@ -97,6 +98,16 @@ module systolic_array #(
         end
     end
 
+    logic [31:0] run_cycles_r;
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            run_cycles_r<= 'd0;
+        end else if (start_pulse) begin
+            run_cycles_r <= 'd0;
+        end else if (status_busy && (current_state != DONE)) begin
+            run_cycles_r <= run_cycles_r + 'd1;
+        end
+    end
 
     // next state logic
     always_comb begin
@@ -131,6 +142,39 @@ module systolic_array #(
         end
     end
 
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            current_state <= IDLE;
+        end else begin
+            current_state <= next_state;
+        end
+    end
+
+    // csr decoeder
+    always_comb begin
+        csr_rdata = 'd0;
+        case (csr_addr)
+            ADDR_CTRL: begin
+                csr_rdata[CTRL_SIGNED_BIT] = pe_ctrl_signed_r;
+            end
+
+            ADDR_STATUS: begin
+                csr_rdata[STATUS_BUSY_BIT] = status_busy;
+                csr_rdata[STATUS_DONE_BIT] = status_done;
+                csr_rdata[STATUS_STATE_LSB+2:STATUS_STATE_LSB] = current_state;
+            end
+
+            ADDR_CYCLES: begin
+                csr_rdata = run_cycles_r;
+            end
+            
+            default: csr_rdata = 'd0;
+        endcase
+    end
+
+    wire pe_clear, pe_enable;
+    assign pe_clear = (current_state == CLEAR);
+    assign pe_enable = (current_state == COMPUTE);
 
     
 endmodule
