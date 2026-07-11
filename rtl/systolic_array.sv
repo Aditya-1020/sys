@@ -4,7 +4,7 @@
 module systolic_array #(
     parameter MATRIX_SIZE = 2,
     parameter DATA_WIDTH = 8,
-    parameter RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 17 (16+1 for overflow)
+    // parameter RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 17 (16+1 for overflow)
     parameter CSR_ADDR_W = 8
 )(
     input logic clk,
@@ -25,6 +25,8 @@ module systolic_array #(
     localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY; // 6
     localparam TOTAL_DRAIN_CYCLES = 1;
     localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
+    localparam RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE); // 17 (16+1 for overflow)
+    localparam PE_ACC_WIDTH = RESULT_WIDTH;
 
     // CSR address map
     localparam logic [CSR_ADDR_W-1:0] ADDR_CTRL = 'h00;
@@ -39,9 +41,9 @@ module systolic_array #(
 
     // reserving these for later (irq stuff)
     // read 0 for now
-    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_1 = 'h0C;
-    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_2 = 'h18;
-    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_3 = 'h1C;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_0 = 'h0C;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_1 = 'h18;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_2 = 'h1C;
 
     localparam CTRL_START_BIT = 0;
     localparam CTRL_SIGNED_BIT = 1;
@@ -175,6 +177,11 @@ module systolic_array #(
             ADDR_CYCLES: begin
                 csr_rdata = run_cycles_r;
             end
+
+            ADDR_RES_0, ADDR_RES_1, ADDR_RES_2: begin
+                csr_rdata = '0;
+            end
+
             
             default: csr_rdata = 'd0;
         endcase
@@ -185,19 +192,19 @@ module systolic_array #(
     assign pe_enable = (current_state == COMPUTE);
 
     
-    wire [DATA_WIDTH-1:0] pe_a_in [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
-    wire [DATA_WIDTH-1:0] pe_b_in [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
-    wire [RESULT_WIDTH-1:0] pe_result [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
-    wire [DATA_WIDTH-1:0] pe_a_out [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
-    wire [RESULT_WIDTH-1:0] pe_b_out [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
+    wire [DATA_WIDTH-1:0] pe_a_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [DATA_WIDTH-1:0] pe_b_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [DATA_WIDTH-1:0] pe_a_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [DATA_WIDTH-1:0] pe_b_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [RESULT_WIDTH-1:0]  pe_result [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 
     genvar r, c;
     generate
-        for (r = 0; r < MATRIX_SIZE; r = r + 1) begin : gen_pe_row
-            for (c = 0; c < MATRIX_SIZE; c = c+1 ) begin : gen_pe_column
+        for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_pe_row
+            for (c = 0; c < ARRAY_COLS; c = c+1 ) begin : gen_pe_column
                 pe #(
                     .DATA_WIDTH(DATA_WIDTH),
-                    .ACC_WIDTH (RESULT_WIDTH) // passing 17
+                    .ACC_WIDTH (PE_ACC_WIDTH)
                  ) pe (
                     .clk     (clk),
                     .rstn    (rstn),
