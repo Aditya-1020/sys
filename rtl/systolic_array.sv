@@ -66,6 +66,8 @@ module systolic_array #(
     // CSR write decode
     wire csr_wr_ctrl = csr_wr && (csr_addr == ADDR_CTRL);
     wire csr_wr_status = csr_wr && (csr_addr == ADDR_STATUS);
+    wire csr_wr_a = csr_wr && (csr_addr == ADDR_MATRIX_A);
+    wire csr_wr_b = csr_wr && (csr_addr == ADDR_MATRIX_B);
 
     wire start_pulse = csr_wr_ctrl && csr_wdata[CTRL_START_BIT];
     wire abort_pulse = csr_wr_ctrl && csr_wdata[CTRL_ABORT_BIT];
@@ -73,6 +75,18 @@ module systolic_array #(
     wire status_busy = (current_state != IDLE);
     wire done_set = (current_state == DRAIN) && (next_state == DONE);
     wire done_w1c = csr_wr_status && csr_wdata[STATUS_DONE_BIT]; // sticky
+    
+    // operand register
+    logic [31:0] matrix_a_r, matrix_b_r;
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            matrix_a_r <= '0;
+            matrix_b_r <= '0;
+        end else begin
+            if (csr_wr_a) begin matrix_a_r <= csr_wdata; end
+            if (csr_wr_b) begin matrix_b_r <= csr_wdata; end
+        end
+    end
     
     // signed control pe
     logic pe_ctrl_signed_r; // note to self (check for its fanout during librelane flow)
@@ -84,14 +98,15 @@ module systolic_array #(
         end
     end
 
-    logic status_done;
+    // done (sticky)
+    logic status_done_r;
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            status_done <= 1'd0;
+            status_done_r <= 1'd0;
         end else if (done_set) begin
-            status_done <= 1'd1;
+            status_done_r <= 1'd1;
         end else if (done_w1c) begin
-            status_done <= 1'd0;
+            status_done_r <= 1'd0;
         end
     end
 
@@ -122,31 +137,22 @@ module systolic_array #(
     // next state logic
     always_comb begin
         next_state = current_state;
-        
         case (current_state)
             IDLE: begin
-                if (start_pulse) next_state = CLEAR;
+                if (start_pulse) begin 
+                    next_state = CLEAR;
+                end
             end
-            
-            CLEAR: begin
-                next_state = COMPUTE;
-            end
-
+            CLEAR: next_state = COMPUTE;
             COMPUTE: begin
-                if (compute_last) next_state = DRAIN;
+                if (compute_last) begin 
+                    next_state = DRAIN;
+                end
             end
-
-            DRAIN: begin
-                next_state = DONE;
-            end
-
-            DONE: begin
-                next_state = IDLE;
-            end
-            
+            DRAIN: next_state = DONE;
+            DONE: next_state = IDLE;
             default: next_state = IDLE;
         endcase
-
         if (abort_pulse) begin // overrides
             next_state = IDLE;
         end
@@ -158,33 +164,6 @@ module systolic_array #(
         end else begin
             current_state <= next_state;
         end
-    end
-
-    // csr decoeder
-    always_comb begin
-        csr_rdata = 'd0;
-        case (csr_addr)
-            ADDR_CTRL: begin
-                csr_rdata[CTRL_SIGNED_BIT] = pe_ctrl_signed_r;
-            end
-
-            ADDR_STATUS: begin
-                csr_rdata[STATUS_BUSY_BIT] = status_busy;
-                csr_rdata[STATUS_DONE_BIT] = status_done;
-                csr_rdata[STATUS_STATE_LSB+2:STATUS_STATE_LSB] = current_state;
-            end
-
-            ADDR_CYCLES: begin
-                csr_rdata = run_cycles_r;
-            end
-
-            ADDR_RES_0, ADDR_RES_1, ADDR_RES_2: begin
-                csr_rdata = '0;
-            end
-
-            
-            default: csr_rdata = 'd0;
-        endcase
     end
 
     wire pe_clear, pe_enable;
@@ -220,6 +199,34 @@ module systolic_array #(
             end
         end
     endgenerate
+
+    // csr decoeder
+    always_comb begin
+        csr_rdata = 'd0;
+        case (csr_addr)
+            ADDR_CTRL: begin
+                csr_rdata[CTRL_SIGNED_BIT] = pe_ctrl_signed_r;
+            end
+
+            ADDR_STATUS: begin
+                csr_rdata[STATUS_BUSY_BIT] = status_busy;
+                csr_rdata[STATUS_DONE_BIT] = status_done_r;
+                csr_rdata[STATUS_STATE_LSB+2:STATUS_STATE_LSB] = current_state;
+            end
+
+            ADDR_CYCLES: begin
+                csr_rdata = run_cycles_r;
+            end
+
+            ADDR_RES_0, ADDR_RES_1, ADDR_RES_2: begin
+                csr_rdata = '0;
+            end
+
+            
+            default: csr_rdata = 'd0;
+        endcase
+    end
+
     
 
 endmodule
