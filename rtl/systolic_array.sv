@@ -4,17 +4,16 @@
 module systolic_array #(
     parameter MATRIX_SIZE = 2,
     parameter DATA_WIDTH = 8,
-    // parameter RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 17 (16+1 for overflow)
     parameter CSR_ADDR_W = 8
 )(
-    input logic clk,
-    input logic rstn, 
+    input wire clk,
+    input wire rstn, 
 
     // csr strobe
-    input logic csr_wr,
-    input logic [CSR_ADDR_W-1:0] csr_addr,
-    input logic [31:0] csr_wdata,
-    output logic [31:0] csr_rdata
+    input wire csr_wr,
+    input wire [CSR_ADDR_W-1:0] csr_addr,
+    input wire [31:0] csr_wdata,
+    output reg [31:0] csr_rdata
 );
     localparam ARRAY_ROWS = MATRIX_SIZE;
     localparam ARRAY_COLS = MATRIX_SIZE;
@@ -170,12 +169,11 @@ module systolic_array #(
     assign pe_clear = (current_state == CLEAR);
     assign pe_enable = (current_state == COMPUTE);
 
-    
     wire [DATA_WIDTH-1:0] pe_a_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     wire [DATA_WIDTH-1:0] pe_b_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     wire [DATA_WIDTH-1:0] pe_a_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     wire [DATA_WIDTH-1:0] pe_b_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-    wire [RESULT_WIDTH-1:0]  pe_result [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [RESULT_WIDTH-1:0] pe_result [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 
     genvar r, c;
     generate
@@ -183,7 +181,7 @@ module systolic_array #(
             for (c = 0; c < ARRAY_COLS; c = c+1 ) begin : gen_pe_column
                 pe #(
                     .DATA_WIDTH(DATA_WIDTH),
-                    .ACC_WIDTH (PE_ACC_WIDTH)
+                    .ACC_WIDTH (PE_ACC_WIDTH) // passes 17 (pe takes 16 INTENIONAL)
                  ) pe (
                     .clk     (clk),
                     .rstn    (rstn),
@@ -200,6 +198,20 @@ module systolic_array #(
         end
     endgenerate
 
+    // register result at done_set
+    logic [RESULT_WIDTH-1:0] result_snap_r [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            for (int i = 0; i < ARRAY_ROWS; i++) begin
+                for (int j = 0; j < ARRAY_COLS; j++) begin
+                    result_snap_r[i][j] <= '0;
+                end
+            end
+        end else if (done_set) begin
+            result_snap_r <= pe_result;
+        end
+    end
+
     // csr decoeder
     always_comb begin
         csr_rdata = 'd0;
@@ -207,22 +219,19 @@ module systolic_array #(
             ADDR_CTRL: begin
                 csr_rdata[CTRL_SIGNED_BIT] = pe_ctrl_signed_r;
             end
-
             ADDR_STATUS: begin
                 csr_rdata[STATUS_BUSY_BIT] = status_busy;
                 csr_rdata[STATUS_DONE_BIT] = status_done_r;
-                csr_rdata[STATUS_STATE_LSB+2:STATUS_STATE_LSB] = current_state;
+                csr_rdata[STATUS_STATE_MSB:STATUS_STATE_LSB] = current_state;
             end
-
-            ADDR_CYCLES: begin
-                csr_rdata = run_cycles_r;
-            end
-
-            ADDR_RES_0, ADDR_RES_1, ADDR_RES_2: begin
-                csr_rdata = '0;
-            end
-
-            
+            ADDR_CYCLES: csr_rdata = run_cycles_r;
+            ADDR_RES_0, ADDR_RES_1, ADDR_RES_2: csr_rdata = '0;
+            ADDR_MATRIX_A: csr_rdata = matrix_a_r;
+            ADDR_MATRIX_B: csr_rdata = matrix_b_r;
+            ADDR_RESULT_00: csr_rdata = pe_ctrl_signed_r ? 32'(signed'(result_snap_r[0][0])) : 32'(result_snap_r[0][0]);
+            ADDR_RESULT_01: csr_rdata = pe_ctrl_signed_r ? 32'(signed'(result_snap_r[0][1])) : 32'(result_snap_r[0][1]);
+            ADDR_RESULT_10: csr_rdata = pe_ctrl_signed_r ? 32'(signed'(result_snap_r[1][0])) : 32'(result_snap_r[1][0]);
+            ADDR_RESULT_11: csr_rdata = pe_ctrl_signed_r ? 32'(signed'(result_snap_r[1][1])) : 32'(result_snap_r[1][1]);
             default: csr_rdata = 'd0;
         endcase
     end
