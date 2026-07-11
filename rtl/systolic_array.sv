@@ -14,12 +14,7 @@ module systolic_array #(
     input logic csr_wr,
     input logic [CSR_ADDR_W-1:0] csr_addr,
     input logic [31:0] csr_wdata,
-    output logic [31:0] csr_rdata,
-
-    input logic [MATRIX_SIZE*DATA_WIDTH-1:0] i_a_feed, // col for a inputs
-    input logic [MATRIX_SIZE*DATA_WIDTH-1:0] i_b_feed, // row for b inputs
-    output logic [MATRIX_SIZE*MATRIX_SIZE*RESULT_WIDTH-1:0] o_result,
-    output logic o_result_valid
+    output logic [31:0] csr_rdata
 );
     localparam ARRAY_ROWS = MATRIX_SIZE;
     localparam ARRAY_COLS = MATRIX_SIZE;
@@ -32,11 +27,21 @@ module systolic_array #(
     localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
 
     // CSR address map
-    localparam ADDR_CTRL = 'h00;
-    localparam ADDR_STATUS = 'h04;
-    localparam ADDR_CYCLES = 'h08;
-    localparam ADDR_MATRIX_A = 'h10;
-    localparam ADDR_MATRIX_B = 'h14;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_CTRL = 'h00;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_STATUS = 'h04;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_CYCLES = 'h08;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_MATRIX_A = 'h10;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_MATRIX_B = 'h14;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RESULT_00 = 'h20;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RESULT_01 = 'h24;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RESULT_10 = 'h28;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RESULT_11 = 'h2C;
+
+    // reserving these for later (irq stuff)
+    // read 0 for now
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_1 = 'h0C;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_2 = 'h18;
+    localparam logic [CSR_ADDR_W-1:0] ADDR_RES_3 = 'h1C;
 
     localparam CTRL_START_BIT = 0;
     localparam CTRL_SIGNED_BIT = 1;
@@ -45,6 +50,7 @@ module systolic_array #(
     localparam STATUS_BUSY_BIT = 0;
     localparam STATUS_DONE_BIT= 1;
     localparam STATUS_STATE_LSB = 2; // [4:2]
+    localparam STATUS_STATE_MSB = 4;
 
     typedef enum logic [2:0] {
         IDLE = 3'd0,
