@@ -31,6 +31,7 @@ $(VERILOG_SV2V) $(BUILD_DIR):
 	mkdir -p $@
 
 $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
+	echo '`timescale 1ps/1ps' > $@
 	sv2v $< > $@
 
 sv2v_rtl: $(V_RTL)
@@ -47,6 +48,7 @@ wave:
 xcompile: $(V_RTL)
 	xvlog -sv $(V_SIM_SRCS)
 
+# xelab -debug typical -top $(TOP) -snapshot $(SNAPSHOT)
 xelab: xcompile
 	xelab -debug typical -top $(TOP) -snapshot $(SNAPSHOT)
 
@@ -64,6 +66,7 @@ sta: $(VERILOG_SV2V)/$(STA_TOP).v | $(BUILD_DIR)
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(SV_TB)
 
+# $(VERILOG_SV2V)
 clean:
-	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) xsim.dir .Xil
+	rm -rf $(BUILD_DIR)  xsim.dir .Xil
 	rm -f dump.vcd *.pb *.log *.wdb *.jou *.str *.vcdv
