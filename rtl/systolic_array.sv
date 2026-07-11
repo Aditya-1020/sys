@@ -43,7 +43,7 @@ module systolic_array #(
     localparam logic [CSR_ADDR_W-1:0] ADDR_CTRL = 'h00;
     localparam logic [CSR_ADDR_W-1:0] ADDR_STATUS = 'h04;
     localparam logic [CSR_ADDR_W-1:0] ADDR_CYCLES = 'h08;
-
+    
     localparam CTRL_START_BIT = 0;
     localparam CTRL_SIGNED_BIT = 1;
     localparam CTRL_ABORT_BIT = 2;

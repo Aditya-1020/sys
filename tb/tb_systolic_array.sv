@@ -65,7 +65,6 @@ module tb_systolic_array;
     localparam EXPECT_CYCLES = 8; // CLAER + COMPUTE + DRAIN (1+6+1)
     localparam TIMEOUT_CYCLES = 50;
 
-
     logic clk;
     initial clk = 1'd0;
     always #10 clk = ~clk;
