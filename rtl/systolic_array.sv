@@ -4,7 +4,7 @@
 module systolic_array #(
     parameter MATRIX_SIZE = 2,
     parameter DATA_WIDTH = 8,
-    parameter RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 17
+    parameter RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 17 (16+1 for overflow)
     parameter CSR_ADDR_W = 8
 )(
     input logic clk,
@@ -35,6 +35,8 @@ module systolic_array #(
     localparam ADDR_CTRL = 'h00;
     localparam ADDR_STATUS = 'h04;
     localparam ADDR_CYCLES = 'h08;
+    localparam ADDR_MATRIX_A = 'h10;
+    localparam ADDR_MATRIX_B = 'h14;
 
     localparam CTRL_START_BIT = 0;
     localparam CTRL_SIGNED_BIT = 1;
@@ -115,7 +117,7 @@ module systolic_array #(
         
         case (current_state)
             IDLE: begin
-                if (start_pulse) next_state <= CLEAR;
+                if (start_pulse) next_state = CLEAR;
             end
             
             CLEAR: begin
@@ -177,5 +179,35 @@ module systolic_array #(
     assign pe_enable = (current_state == COMPUTE);
 
     
+    wire [DATA_WIDTH-1:0] pe_a_in [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
+    wire [DATA_WIDTH-1:0] pe_b_in [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
+    wire [RESULT_WIDTH-1:0] pe_result [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
+    wire [DATA_WIDTH-1:0] pe_a_out [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
+    wire [RESULT_WIDTH-1:0] pe_b_out [0:MATRIX_SIZE-1][0:MATRIX_SIZE-1];
+
+    genvar r, c;
+    generate
+        for (r = 0; r < MATRIX_SIZE; r = r + 1) begin : gen_pe_row
+            for (c = 0; c < MATRIX_SIZE; c = c+1 ) begin : gen_pe_column
+                pe #(
+                    .DATA_WIDTH(DATA_WIDTH),
+                    .ACC_WIDTH (RESULT_WIDTH) // passing 17
+                 ) pe (
+                    .clk     (clk),
+                    .rstn    (rstn),
+                    .i_enable(pe_enable),
+                    .i_clear (pe_clear),
+                    .i_signed(pe_ctrl_signed_r),
+                    .i_a     (pe_a_in[r][c]),
+                    .i_b     (pe_b_in[r][c]),
+                    .o_a     (pe_a_out[r][c]),
+                    .o_b     (pe_b_out[r][c]),
+                    .o_psum  (pe_result[r][c])
+                );
+            end
+        end
+    endgenerate
+    
+
 endmodule
 `default_nettype wire
