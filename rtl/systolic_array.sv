@@ -55,6 +55,7 @@ module systolic_array #(
     localparam SRAM_ADDR_W = 8;
     localparam SRAM_DATA_W = 32;
     localparam SEG_OFFSET_W = 6;
+
     localparam logic [1:0] SEG_A = 2'd0;
     localparam logic [1:0] SEG_B = 2'd1;
     localparam logic [1:0] SEG_C = 2'd2;
@@ -90,7 +91,7 @@ module systolic_array #(
 
     wire bus_data_access = cache_a_access || cache_b_access || cache_c_access;
     wire bus_data_wr = (cache_a_access || cache_b_access) && csr_wr;
-    wire bus_data_rd = (cache_c_access && csr_rd);
+    wire bus_data_rd = bus_data_access && csr_rd;
     
     // signed control pe
     logic pe_ctrl_signed_r;
@@ -274,6 +275,31 @@ module systolic_array #(
         end
     end
 
+    generate
+        for (r = 0; r < ARRAY_ROWS; r= r + 1) begin : gen_a_feed
+            wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r); // element of row dot prod current cycle
+            wire [COUNT_WIDTH-1:0] start = COUNT_WIDTH'(r);
+            wire [COUNT_WIDTH-1:0] stop = COUNT_WIDTH'(r + INNER_DIM);
+            // feed window true if 0 <= elm_a < k
+            wire feed_window = (cycle_count_r >= start) && (cycle_count_r < stop); // check if row in feed window
+            
+
+            assign pe_a_in[r][0] = (pe_enable && feed_window) ? a_hold_r[DATA_WIDTH*(INNER_DIM*r + elm_a) +: DATA_WIDTH] : '0;
+        end
+    endgenerate
+
+    generate
+        for (c = 0; c < ARRAY_COLS; c= c + 1) begin : gen_b_feed
+            wire [COUNT_WIDTH-1:0] elm_b = cycle_count_r - COUNT_WIDTH'(c); // element of col dot prod current cycle
+            wire [COUNT_WIDTH-1:0] start = COUNT_WIDTH'(c);
+            wire [COUNT_WIDTH-1:0] stop = COUNT_WIDTH'(c + INNER_DIM);
+            wire feed_window = (cycle_count_r >= start) && (cycle_count_r < stop); // check if col in feed window
+            // feed window true if 0 <= elm_a < k
+
+            assign pe_b_in[0][c] = (pe_enable && feed_window) ? b_hold_r[DATA_WIDTH*(ARRAY_COLS*elm_b + c) +: DATA_WIDTH] : '0;
+        end
+    endgenerate
+
     // sram access
     wire [RESULT_WIDTH-1:0] wb_pe_result = pe_result_flat[wb_idx_r];
     wire signed [RESULT_WIDTH-1:0] wb_pe_result_signed = wb_pe_result;
@@ -359,6 +385,27 @@ module systolic_array #(
 
     assign csr_rdata = rd_from_sram_q ? sram_dout : ctrl_rdata_r;
     assign csr_rvalid = rvalid_r;
+
+    // peroformance counter
+    generate
+        if (PERF_COUNTER_EN) begin : gen_perf_counters
+            wire monitor_mem_access = !sram_csb || !feed_csb;
+
+            perf_monitor perf_inst (
+                .clk         (clk),
+                .rstn        (rstn),
+                .i_run_start (start_pulse && !status_busy),
+                .i_run_done  (done_set),
+                .i_busy      (status_busy),
+                .i_load      (feed_active),
+                .i_compute   (pe_enable),
+                .i_writeback (engine_ownd),
+                .i_mem_access(monitor_mem_access),
+                .i_csr_wr    (csr_wr),
+                .i_csr_rd    (csr_rd)
+            );
+        end
+    endgenerate
 
 endmodule
 `default_nettype wire
