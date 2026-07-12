@@ -53,6 +53,7 @@ module systolic_array #(
     localparam STATUS_STATE_MSB = 4;
 
     localparam SRAM_ADDR_W = 8;
+    localparam SRAM_DATA_W = 32;
     localparam SEG_OFFSET_W = 6;
     localparam logic [1:0] SEG_A = 2'd0;
     localparam logic [1:0] SEG_B = 2'd1;
@@ -151,7 +152,6 @@ module systolic_array #(
             wb_idx_r <= wb_idx_r + WB_COUNT_WIDTH'(1);
         end
     end
-
 
     // next state logic
     always_comb begin
@@ -260,7 +260,48 @@ module systolic_array #(
     end
 
     // sram access
-    
+    wire [RESULT_WIDTH-1:0] wb_pe_result = pe_result_flat[wb_idx_r];
+    wire signed [RESULT_WIDTH-1:0] wb_pe_result_signed = wb_pe_result;
+    wire [31:0] wb_data = pe_ctrl_signed_r ? 32'(wb_pe_result_signed) : 32'(wb_pe_result);
+
+    logic [1:0] bus_seg;
+    always_comb begin
+        bus_seg = SEG_A;
+        case (csr_region)
+            REGION_A: bus_seg = SEG_A;
+            REGION_B: bus_seg = SEG_B;
+            REGION_C: bus_seg = SEG_C;
+            default: bus_seg = SEG_A;
+        endcase
+    end
+
+    wire [SEG_OFFSET_W-1:0] csr_addr_segb_ext = SEG_OFFSET_W'(csr_addr[5:2]);
+    wire [SEG_OFFSET_W-1:0] wb_idx_r_segb_ext = SEG_OFFSET_W'(wb_idx_r);
+    wire [SRAM_ADDR_W-1:0] bus_word = {bus_seg, csr_addr_segb_ext};
+    wire [SRAM_ADDR_W-1:0] engg_word = {SEG_C, wb_idx_r_segb_ext};
+
+    // enggine owns rw during writebck
+    wire [31:0] sram_dout;
+    wire sram_csb = !engine_ownd && !bus_data_access;
+    wire sram_web = !engine_ownd && !bus_data_wr;
+    wire [SRAM_ADDR_W-1:0] sram_addr = engine_ownd ? engg_word : bus_word;
+    wire [31:0] sram_din = engine_ownd ? wb_data : csr_wdata;
+
+    sram_model #(
+        .ADDR_WIDTH(SRAM_ADDR_W),
+        .DATA_WIDTH(SRAM_DATA_W)
+     ) sram_model (
+        .clk    (clk),
+        .rw_csb (sram_csb),
+        .rw_web (sram_web),
+        .rw_addr(sram_addr),
+        .rw_din (sram_din),
+        .rw_dout(sram_dout),
+        .r_csb  (feed_csb),
+        .r_addr (feed_addr),
+        .r_dout (feed_dout)
+    );
+
 
 endmodule
 `default_nettype wire
