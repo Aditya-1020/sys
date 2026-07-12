@@ -328,10 +328,39 @@ module systolic_array #(
                 ctrl_rdata[STATUS_DONE_BIT] = status_done_q;
                 ctrl_rdata[STATUS_STATE_MSB:STATUS_STATE_LSB] = current_state;
             end
-            
+            ADDR_CTRL: ctrl_rdata = run_cycles_r;
+            default: ctrl_rdata = 32'b0;
         endcase
     end
 
+    logic rvalid_r, rd_sram_r;
+    logic [31:0] ctrl_rdata_r;
+    logic [31:0] sel_ctrl_data;
+    
+    always_comb begin
+        sel_ctrl_data = 32'd0;
+    
+        if (region_ctrl) begin
+            sel_ctrl_data = ctrl_rdata;
+        end else begin
+            sel_ctrl_data = 32'd0;
+        end
+    end
+
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            rvalid_r <= '0;
+            rd_sram_r <= '0;
+            ctrl_rdata_r <='0;
+        end else begin
+            rvalid_r <= csr_rd;
+            rd_sram_r <= bus_data_rd;
+            ctrl_rdata_r <= sel_ctrl_data;
+        end
+    end
+
+    assign csr_rdata = rd_sram_r ? sram_dout : ctrl_rdata_r;
+    assign csr_rvalid = rvalid_r;
 
 endmodule
 `default_nettype wire
