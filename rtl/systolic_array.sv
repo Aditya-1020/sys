@@ -103,15 +103,30 @@ module systolic_array #(
     end
 
     // done (sticky w1c)
-    logic status_done_r;
-    wire done_set = (current_state == WRITEBACK) && (next_state == DONE);
+    // sticky DONE status w1c
+    // if (set && clear == 1) then hw set wins
+    logic done_set;
+    logic status_done_d, status_done_q;
+    always_comb begin
+        done_set = (current_state == WRITEBACK) && (next_state == DONE);
+    end
+    always_comb begin
+        status_done_d = status_done_q;
+        
+        if (done_w1c) begin // sw
+            status_done_d = 1'b0;
+        end 
+        
+        if (done_set) begin // hw set
+            status_done_d = 1'b1;
+        end
+    end
+
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            status_done_r <= 1'd0;
-        end else if (done_set) begin
-            status_done_r <= 1'd1;
-        end else if (done_w1c) begin
-            status_done_r <= 1'd0;
+            status_done_q <= 1'b0;
+        end else begin
+            status_done_q <= status_done_d;
         end
     end
 
@@ -301,6 +316,21 @@ module systolic_array #(
         .r_addr (feed_addr),
         .r_dout (feed_dout)
     );
+
+    // csr decoder
+    logic [31:0] ctrl_rdata;
+    always_comb begin
+        ctrl_rdata = 32'd0;
+        case (csr_addr) 
+            ADDR_CTRL: ctrl_rdata[CTRL_SIGNED_BIT] = pe_ctrl_signed_r;
+            ADDR_STATUS: begin
+                ctrl_rdata[STATUS_BUSY_BIT] = status_busy;
+                ctrl_rdata[STATUS_DONE_BIT] = status_done_q;
+                ctrl_rdata[STATUS_STATE_MSB:STATUS_STATE_LSB] = current_state;
+            end
+            
+        endcase
+    end
 
 
 endmodule
