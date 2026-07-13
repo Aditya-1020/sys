@@ -1,29 +1,6 @@
-// NOT FOR SYNTHESIS
-// THIS PEROFRMANCE MONITOR WAS GENERATED WITH CLAUDE (i was tired)
+// NOT FOR SYNTHESIS - sim only
 `default_nettype none
 `timescale 1ps/1ps
-
-/*
-generate
-        if (PERF_COUNTER_EN) begin : gen_perf_counters
-            wire monitor_mem_access = !sram_csb || !feed_csb;
-
-            perf_monitor perf_inst (
-                .clk         (clk),
-                .rstn        (rstn),
-                .i_run_start (start_pulse && !status_busy),
-                .i_run_done  (done_set),
-                .i_busy      (status_busy),
-                .i_load      (feed_active),
-                .i_compute   (pe_enable),
-                .i_writeback (engine_ownd),
-                .i_mem_access(monitor_mem_access),
-                .i_csr_wr    (csr_wr),
-                .i_csr_rd    (csr_rd)
-            );
-        end
-endgenerate
-*/
 
 module perf_monitor #(
     parameter bit VERBOSE = 1'b1
@@ -37,7 +14,6 @@ module perf_monitor #(
     input wire i_load,
     input wire i_compute,
     input wire i_writeback,
-    input wire i_mem_access,
     input wire i_csr_wr,
     input wire i_csr_rd
 );
@@ -46,7 +22,6 @@ module perf_monitor #(
     int unsigned load_cycles = 0;
     int unsigned compute_cycles = 0;
     int unsigned wb_cycles = 0;
-    int unsigned mem_accesses = 0;
     int unsigned csr_writes = 0;
     int unsigned csr_reads = 0;
 
@@ -64,7 +39,6 @@ module perf_monitor #(
             if (i_load) load_cycles = load_cycles + 1;
             if (i_compute) compute_cycles = compute_cycles + 1;
             if (i_writeback) wb_cycles = wb_cycles + 1;
-            if (i_mem_access) mem_accesses = mem_accesses + 1;
             if (i_csr_wr) csr_writes = csr_writes + 1;
             if (i_csr_rd) csr_reads = csr_reads + 1;
 
@@ -89,8 +63,8 @@ module perf_monitor #(
             $display("[perf %m] ---- summary t=%0t ----", $time);
             $display("[perf %m] cycles: total=%0d busy=%0d load=%0d compute=%0d writeback=%0d",
                      total_cycles, busy_cycles, load_cycles, compute_cycles, wb_cycles);
-            $display("[perf %m] access: sram=%0d csr_wr=%0d csr_rd=%0d",
-                     mem_accesses, csr_writes, csr_reads);
+            $display("[perf %m] access: csr_wr=%0d csr_rd=%0d",
+                     csr_writes, csr_reads);
             if (runs != 0)
                 $display("[perf %m] runs: done=%0d started=%0d latency min/avg/max = %0d/%.1f/%0d",
                          runs, starts, min_run, $itor(sum_runs)/runs, max_run);

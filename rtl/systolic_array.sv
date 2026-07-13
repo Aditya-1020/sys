@@ -279,7 +279,6 @@ module systolic_array #(
                 .i_load      ((current_state == REC_A) || (current_state == REC_B)),
                 .i_compute   (pe_enable),
                 .i_writeback (current_state == DRAIN),
-                .i_mem_access(1'b0),
                 .i_csr_wr    (csr_wr),
                 .i_csr_rd    (csr_rd)
             );

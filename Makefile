@@ -4,18 +4,21 @@ CONSTRAINTS_DIR = constraints
 BUILD_DIR = build
 VERILOG_SV2V = verilog_sv2v
 
-# openram macro + its wrapper are not converted/simulated;
-# tb/sram_stub.sv provides sram_model for simulation
-SRAM_GEN  = $(RTL_DIR)/sky130_sram_1kbyte_1rw1r_32x256_8.v
-SRAM_WRAP = $(RTL_DIR)/sram_model.sv
-
-SV_RTL = $(filter-out $(SRAM_WRAP), $(wildcard $(RTL_DIR)/*.sv))
+SV_RTL = $(wildcard $(RTL_DIR)/*.sv)
 SV_TB = $(wildcard $(TB_DIR)/*.sv)
 V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 V_SIM_SRCS = $(V_RTL) $(SV_TB)
 
 TOP = tb_systolic_array
 SNAPSHOT = $(TOP)_snap
+
+SYNTH_TOP = systolic_array
+SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
+CELL_V_DIR = $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog
+
+GLS_CELL_DIR = $(BUILD_DIR)/gls_cells
+GLS_CELLS = $(GLS_CELL_DIR)/primitives.v $(GLS_CELL_DIR)/sky130_fd_sc_hd.v
+GLS_SNAPSHOT = $(TOP)_gls_snap
 
 # STA: scripts in scripts/<module>/{synth,sta}.tcl, sdc in constraints/<module>.sdc
 PDK_ROOT ?= $(HOME)/eda/.volare
@@ -25,7 +28,7 @@ TT_STA_LIB ?= $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
 
 export TT_STA_LIB
 
-.PHONY: all wave xcompile xelab xrun xgui sta lint clean sv2v_rtl
+.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl
 
 all: xrun
 
@@ -49,6 +52,21 @@ xrun: xelab
 
 xgui: xelab
 	xsim $(SNAPSHOT) -gui &
+
+$(SYNTH_V): $(V_RTL) scripts/$(SYNTH_TOP)/synth.tcl | $(BUILD_DIR)
+	yosys -c scripts/$(SYNTH_TOP)/synth.tcl
+
+synth: $(SYNTH_V)
+
+$(GLS_CELL_DIR)/%.v: $(CELL_V_DIR)/%.v | $(BUILD_DIR)
+	mkdir -p $(GLS_CELL_DIR)
+	sed -e 's/`default_nettype none/`default_nettype wire/' \
+	    -e 's/^`endif \([A-Za-z_]\)/`endif \/\/ \1/' $< > $@
+
+gls: $(SYNTH_V) $(GLS_CELLS)
+	xvlog -sv -d GLS -d FUNCTIONAL -d "UNIT_DELAY=#1" $(GLS_CELLS) $(SYNTH_V) $(SV_TB)
+	xelab -debug typical -top $(TOP) -snapshot $(GLS_SNAPSHOT)
+	xsim $(GLS_SNAPSHOT) -R
 
 wave:
 	gtkwave dump.vcd &
