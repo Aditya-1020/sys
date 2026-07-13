@@ -24,7 +24,7 @@ module systolic_array #(
     localparam INNER_DIM = MATRIX_SIZE; // K MACs per PE
 
     localparam FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
-    localparam PE_LATENCY = 2;
+    localparam PE_LATENCY = 1;
     localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY;
     localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
     
