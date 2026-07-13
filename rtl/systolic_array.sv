@@ -4,19 +4,32 @@
 module systolic_array #(
     parameter MATRIX_SIZE = 2,
     parameter DATA_WIDTH = 8,
-    parameter CSR_ADDR_W = 8, // 2 bit region + 6 bit offset (grws for N>4)
+    parameter CSR_ADDR_W = 8,
+    parameter STREAM_W = 32,
     parameter bit PERF_COUNTER_EN = 1'b0
 )(
     input wire clk,
-    input wire rstn, 
+    input wire rstn,
 
-    // csr strobe
+    // csr config regs
     input wire csr_wr,
     input wire csr_rd,
     input wire [CSR_ADDR_W-1:0] csr_addr,
     input wire [31:0] csr_wdata,
     output wire [31:0] csr_rdata,
-    output wire csr_rvalid
+    output wire csr_rvalid,
+
+    // input stream (a then b)
+    input wire s_tvalid,
+    output wire s_tready,
+    input wire [STREAM_W-1:0] s_tdata,
+    input wire s_tlast,
+
+    // output stream (c in row-major)
+    output wire m_tvalid,
+    input wire m_tready,
+    output wire [STREAM_W-1:0] m_tdata,
+    output wire m_tlast
 );
     localparam ARRAY_ROWS = MATRIX_SIZE;
     localparam ARRAY_COLS = MATRIX_SIZE;
@@ -28,126 +41,41 @@ module systolic_array #(
     localparam TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY;
     localparam COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
     
-    localparam RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE); // 17 (16+1 for overflow)
+    localparam RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE);
     localparam PE_ACC_WIDTH = RESULT_WIDTH;
-    localparam WB_COUNT_WIDTH = $clog2(MATRIX_ELEMENTS);
-    
-    // CSR address map
-    // addr[7:6] selects region
-    localparam logic [1:0] REGION_CTRL = 2'd0; // 0x00-0x3F ctrl/stat
-    localparam logic [1:0] REGION_A = 2'd1; // 0x40-0x7F a matrix cache
-    localparam logic [1:0] REGION_B = 2'd2; // 0x80-0xbF B matrix cache
-    localparam logic [1:0] REGION_C = 2'd3; // 0xC0-0xFF results C bus
+    localparam DRAIN_IDX_W = $clog2(MATRIX_ELEMENTS);
+    localparam PACKED_W = MATRIX_ELEMENTS * DATA_WIDTH;
 
+    // CSR address map
     localparam logic [CSR_ADDR_W-1:0] ADDR_CTRL = 'h00;
     localparam logic [CSR_ADDR_W-1:0] ADDR_STATUS = 'h04;
-    localparam logic [CSR_ADDR_W-1:0] ADDR_CYCLES = 'h08;
-    
-    localparam CTRL_START_BIT = 0;
-    localparam CTRL_SIGNED_BIT = 1;
-    localparam CTRL_ABORT_BIT = 2;
+    // localparam logic [CSR_ADDR_W-1:0] ADDR_CYCLES = 'h08;
 
+    localparam CTRL_SIGNED_BIT = 1;
     localparam STATUS_BUSY_BIT = 0;
-    localparam STATUS_DONE_BIT= 1;
     localparam STATUS_STATE_LSB = 2;
     localparam STATUS_STATE_MSB = 4;
 
-    localparam SRAM_ADDR_W = 8;
-    localparam SRAM_DATA_W = 32;
-    localparam SEG_OFFSET_W = 6;
-
-    localparam logic [1:0] SEG_A = 2'd0;
-    localparam logic [1:0] SEG_B = 2'd1;
-    localparam logic [1:0] SEG_C = 2'd2;
-
     typedef enum logic [2:0] {
-        IDLE = 3'd0,
-        LOAD_A = 3'd1,
-        LOAD_B = 3'd2,
-        CLEAR = 3'd3,
-        COMPUTE = 3'd4,
-        WRITEBACK = 3'd5,
-        DONE = 3'd6
+        RECV_A = 3'd0, // idle cum receive a
+        RECV_B = 3'd1,
+        CLEAR = 3'd2,
+        COMPUTE = 3'd3,
+        DRAIN = 3'd4
     } state_t;
     state_t current_state, next_state;
 
-    wire status_busy = (current_state != IDLE);
-    wire engine_ownd = (current_state == WRITEBACK); // sram rw port owned
+    wire status_busy = (current_state != RECV_A);
 
-    // CSR write decode
-    wire [1:0] csr_region = csr_addr[CSR_ADDR_W-1 -:2]; // = [7:6]
-    wire region_ctrl = (csr_region == REGION_CTRL);
-
-    wire csr_wr_ctrl = csr_wr && (csr_addr == ADDR_CTRL);
-    wire csr_wr_status = csr_wr && (csr_addr == ADDR_STATUS);
-
-    wire start_pulse = csr_wr_ctrl && csr_wdata[CTRL_START_BIT];
-    wire abort_pulse = csr_wr_ctrl && csr_wdata[CTRL_ABORT_BIT];
-    wire done_w1c = csr_wr_status && csr_wdata[STATUS_DONE_BIT]; // sticky
-
-    wire cache_a_access = (csr_region == REGION_A) && (csr_wr|| csr_rd) && !status_busy;
-    wire cache_b_access = (csr_region == REGION_B) && (csr_wr|| csr_rd) && !status_busy;
-    wire cache_c_access = (csr_region == REGION_C) && csr_rd && !status_busy;
-
-    wire bus_data_access = cache_a_access || cache_b_access || cache_c_access;
-    wire bus_data_wr = (cache_a_access || cache_b_access) && csr_wr;
-    wire bus_data_rd = bus_data_access && csr_rd;
-    
-    // signed control pe
-    logic pe_ctrl_signed_r;
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            pe_ctrl_signed_r <= 1'd0;
-        end else if (csr_wr_ctrl && !status_busy) begin // lock if busy
-            pe_ctrl_signed_r <= csr_wdata[CTRL_SIGNED_BIT];
-        end
-    end
-
-    // done (sticky w1c)
-    // sticky DONE status w1c
-    // if (set && clear == 1) then hw set wins
-    logic done_set;
-    logic status_done_d, status_done_q;
-    always_comb begin
-        done_set = (current_state == WRITEBACK) && (next_state == DONE);
-    end
-    always_comb begin
-        status_done_d = status_done_q;
-        
-        if (done_w1c) begin // sw
-            status_done_d = 1'b0;
-        end 
-        
-        if (done_set) begin // hw set
-            status_done_d = 1'b1;
-        end
-    end
-
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            status_done_q <= 1'b0;
-        end else begin
-            status_done_q <= status_done_d;
-        end
-    end
-
-    // perf counter (11 at 2x2 = clear+ 6 compute + 4 writeback)
-    logic [31:0] run_cycles_r;
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            run_cycles_r <= 32'd0;
-        end else if (start_pulse && !status_busy) begin
-            run_cycles_r <= 32'd0;
-        end else if (status_busy && (current_state != DONE)) begin
-            run_cycles_r <= run_cycles_r + 32'd1;
-        end
-    end
+    // stream handshakes
+    wire slave_hs = s_tvalid && s_tready;
+    wire master_hs = m_tvalid && m_tready;
 
     // compute phase counter
     logic [COUNT_WIDTH-1:0] cycle_count_r;
     wire compute_last = (cycle_count_r == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
     always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin 
+        if (!rstn) begin
             cycle_count_r <= '0;
         end else if (current_state != COMPUTE) begin
             cycle_count_r <= '0;
@@ -156,16 +84,16 @@ module systolic_array #(
         end
     end
 
-    // writeback counter
-    logic [WB_COUNT_WIDTH-1:0] wb_idx_r;
-    wire wb_last = (wb_idx_r == WB_COUNT_WIDTH'(MATRIX_ELEMENTS-1));
+    // drain index (result element on the bus)
+    logic [DRAIN_IDX_W-1:0] drain_idx_r;
+    wire drain_last = (drain_idx_r == DRAIN_IDX_W'(MATRIX_ELEMENTS-1));
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            wb_idx_r <= '0;
-        end else if (current_state != WRITEBACK) begin
-            wb_idx_r <= '0;
-        end else begin
-            wb_idx_r <= wb_idx_r + WB_COUNT_WIDTH'(1);
+            drain_idx_r <= '0;
+        end else if (current_state != DRAIN) begin
+            drain_idx_r <= '0;
+        end else if (master_hs) begin
+            drain_idx_r <= drain_idx_r + DRAIN_IDX_W'(1);
         end
     end
 
@@ -173,41 +101,77 @@ module systolic_array #(
     always_comb begin
         next_state = current_state;
         case (current_state)
-            IDLE: begin
-                if (start_pulse) begin 
-                    next_state = LOAD_A;
+            RECV_A:  begin
+                if (slave_hs) begin
+                    next_state = RECV_B;
                 end
             end
-
-            LOAD_A: next_state = LOAD_B;
-            LOAD_B: next_state = CLEAR;
+            RECV_B: begin
+                if (slave_hs) begin
+                    next_state = CLEAR;
+                end
+            end
             CLEAR: next_state = COMPUTE;
-            
             COMPUTE: begin
-                if (compute_last) begin 
-                    next_state = WRITEBACK;
+                if (compute_last) begin
+                    next_state = DRAIN;
                 end
             end
-            WRITEBACK: begin
-                if (wb_last) begin
-                    next_state = DONE;
+            DRAIN: begin
+                if (drain_last && master_hs) begin
+                     next_state = RECV_A;
                 end
             end
-            DONE: next_state = IDLE;
-            default: next_state = IDLE;
+            default: next_state = RECV_A; // base idle state
         endcase
-        if (abort_pulse) begin // overrides
-            next_state = IDLE;
-        end
     end
 
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            current_state <= IDLE;
+            current_state <= RECV_A;
         end else begin
             current_state <= next_state;
         end
     end
+
+    // input register file (operands)
+    logic [PACKED_W-1:0] a_r, b_r; // storeing input matrix
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            a_r <= '0;
+            b_r <= '0;
+        end else begin
+            if (current_state == RECV_A && slave_hs) begin
+                a_r <= s_tdata[PACKED_W-1:0];// register input a 
+            end
+            
+            if (current_state == RECV_B && slave_hs) begin
+                b_r <= s_tdata[PACKED_W-1:0]; // registter input b
+            end
+        end
+    end
+
+    // signed control pe
+    logic pe_ctrl_signed_r;
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            pe_ctrl_signed_r <= 1'b0;
+        end else if (csr_wr && (csr_addr == ADDR_CTRL) && !status_busy) begin
+            pe_ctrl_signed_r <= csr_wdata[CTRL_SIGNED_BIT];
+        end
+    end
+
+    // perf counter (unneded i already do a performance counter forgot to remove it)
+    // logic [31:0] run_cycles_r;
+    // always_ff @(posedge clk or negedge rstn) begin
+    //     if (!rstn) begin
+    //         run_cycles_r <= 32'd0;
+    //     end else if (current_state == RECV_A) begin
+    //         run_cycles_r <= 32'd0;
+    //     end else begin
+    //         run_cycles_r <= run_cycles_r + 32'd1;
+    //     end
+    // end
 
     wire pe_clear = (current_state == CLEAR);
     wire pe_enable = (current_state == COMPUTE);
@@ -253,28 +217,7 @@ module systolic_array #(
         end
     endgenerate
 
-    wire [31:0] feed_dout;
-    wire feed_active = (current_state == LOAD_A) || (current_state == LOAD_B);
-    wire feed_csb = !feed_active;
-    wire [1:0] feed_seg_sel = (current_state == LOAD_A) ? SEG_A : SEG_B;
-    wire [SRAM_ADDR_W-1:0] feed_addr = {feed_seg_sel, {SEG_OFFSET_W{1'b0}}};
-
-    logic [31:0] a_hold_r, b_hold_r;
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            a_hold_r <= '0;
-            b_hold_r <= '0;
-        end else begin
-            if (current_state == LOAD_B) begin
-                a_hold_r <= feed_dout;
-            end
-            
-            if (current_state == CLEAR) begin
-                b_hold_r <= feed_dout;
-            end
-        end
-    end
-
+    // feeding wires
     generate
         for (r = 0; r < ARRAY_ROWS; r= r + 1) begin : gen_a_feed
             wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r); // element of row dot prod current cycle
@@ -283,8 +226,7 @@ module systolic_array #(
             // feed window true if 0 <= elm_a < k
             wire feed_window = (cycle_count_r >= start) && (cycle_count_r < stop); // check if row in feed window
             
-
-            assign pe_a_in[r][0] = (pe_enable && feed_window) ? a_hold_r[DATA_WIDTH*(INNER_DIM*r + elm_a) +: DATA_WIDTH] : '0;
+            assign pe_a_in[r][0] = (pe_enable && feed_window) ? a_r[DATA_WIDTH*(INNER_DIM*r + elm_a) +: DATA_WIDTH] : '0;
         end
     endgenerate
 
@@ -294,113 +236,64 @@ module systolic_array #(
             wire [COUNT_WIDTH-1:0] start = COUNT_WIDTH'(c);
             wire [COUNT_WIDTH-1:0] stop = COUNT_WIDTH'(c + INNER_DIM);
             wire feed_window = (cycle_count_r >= start) && (cycle_count_r < stop); // check if col in feed window
-            // feed window true if 0 <= elm_a < k
+            // feed window true if 0 <= elm_b < k
 
-            assign pe_b_in[0][c] = (pe_enable && feed_window) ? b_hold_r[DATA_WIDTH*(ARRAY_COLS*elm_b + c) +: DATA_WIDTH] : '0;
+            assign pe_b_in[0][c] = (pe_enable && feed_window) ? b_r[DATA_WIDTH*(ARRAY_COLS*elm_b + c) +: DATA_WIDTH] : '0;
         end
     endgenerate
 
-    // sram access
-    wire [RESULT_WIDTH-1:0] wb_pe_result = pe_result_flat[wb_idx_r];
-    wire signed [RESULT_WIDTH-1:0] wb_pe_result_signed = wb_pe_result;
-    wire [31:0] wb_data = pe_ctrl_signed_r ? 32'(wb_pe_result_signed) : 32'(wb_pe_result);
+    // output stream drain the accumulators (no storage)
+    wire [RESULT_WIDTH-1:0] drain_res = pe_result_flat[drain_idx_r];
+    wire signed [RESULT_WIDTH-1:0] drain_res_s = drain_res;
 
-    logic [1:0] bus_seg;
-    always_comb begin
-        bus_seg = SEG_A;
-        case (csr_region)
-            REGION_A: bus_seg = SEG_A;
-            REGION_B: bus_seg = SEG_B;
-            REGION_C: bus_seg = SEG_C;
-            default: bus_seg = SEG_A;
-        endcase
-    end
+    assign s_tready = (current_state == RECV_A) || (current_state == RECV_B);
+    assign m_tvalid = (current_state == DRAIN);
+    assign m_tlast = (current_state == DRAIN) && drain_last;
+    assign m_tdata = pe_ctrl_signed_r ? 32'(drain_res_s) : 32'(drain_res);
 
-    wire [SEG_OFFSET_W-1:0] csr_addr_segb_ext = SEG_OFFSET_W'(csr_addr[5:2]);
-    wire [SEG_OFFSET_W-1:0] wb_idx_r_segb_ext = SEG_OFFSET_W'(wb_idx_r);
-    wire [SRAM_ADDR_W-1:0] bus_word = {bus_seg, csr_addr_segb_ext};
-    wire [SRAM_ADDR_W-1:0] engg_word = {SEG_C, wb_idx_r_segb_ext};
-
-    // enggine owns rw during writebck
-    wire [31:0] sram_dout;
-    wire sram_csb = !engine_ownd && !bus_data_access;
-    wire sram_web = !engine_ownd && !bus_data_wr;
-    wire [SRAM_ADDR_W-1:0] sram_addr = engine_ownd ? engg_word : bus_word;
-    wire [31:0] sram_din = engine_ownd ? wb_data : csr_wdata;
-
-    sram_model #(
-        .ADDR_WIDTH(SRAM_ADDR_W),
-        .DATA_WIDTH(SRAM_DATA_W)
-     ) sram_model (
-        .clk    (clk),
-        .rw_csb (sram_csb),
-        .rw_web (sram_web),
-        .rw_addr(sram_addr),
-        .rw_din (sram_din),
-        .rw_dout(sram_dout),
-        .r_csb  (feed_csb),
-        .r_addr (feed_addr),
-        .r_dout (feed_dout)
-    );
-
-    // csr decoder
+    // csr control
     logic [31:0] ctrl_rdata;
     always_comb begin
         ctrl_rdata = 32'd0;
-        case (csr_addr) 
+        case (csr_addr)
             ADDR_CTRL: ctrl_rdata[CTRL_SIGNED_BIT] = pe_ctrl_signed_r;
             ADDR_STATUS: begin
                 ctrl_rdata[STATUS_BUSY_BIT] = status_busy;
-                ctrl_rdata[STATUS_DONE_BIT] = status_done_q;
                 ctrl_rdata[STATUS_STATE_MSB:STATUS_STATE_LSB] = current_state;
             end
-            ADDR_CYCLES: ctrl_rdata = run_cycles_r;
-            default: ctrl_rdata = 32'b0;
+            // ADDR_CYCLES: ctrl_rdata = run_cycles_r;
+            default: ctrl_rdata = 32'd0;
         endcase
     end
 
-    logic rvalid_r, rd_from_sram_q;
+    logic rvalid_r;
     logic [31:0] ctrl_rdata_r;
-    logic [31:0] sel_ctrl_data;
-    
-    always_comb begin
-        sel_ctrl_data = 32'd0;
-    
-        if (region_ctrl) begin
-            sel_ctrl_data = ctrl_rdata;
-        end
-    end
-
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            rvalid_r <= '0;
-            rd_from_sram_q <= '0;
-            ctrl_rdata_r <='0;
+            rvalid_r <= 1'b0;
+            ctrl_rdata_r <= 32'd0;
         end else begin
             rvalid_r <= csr_rd;
-            rd_from_sram_q <= bus_data_rd;
-            ctrl_rdata_r <= sel_ctrl_data;
+            ctrl_rdata_r <= ctrl_rdata;
         end
     end
-
-    assign csr_rdata = rd_from_sram_q ? sram_dout : ctrl_rdata_r;
+    
+    assign csr_rdata = ctrl_rdata_r;
     assign csr_rvalid = rvalid_r;
 
     // peroformance counter
     generate
         if (PERF_COUNTER_EN) begin : gen_perf_counters
-            wire monitor_mem_access = !sram_csb || !feed_csb;
-
             perf_monitor perf_inst (
                 .clk         (clk),
                 .rstn        (rstn),
-                .i_run_start (start_pulse && !status_busy),
-                .i_run_done  (done_set),
+                .i_run_start (current_state == RECV_B && slave_hs),
+                .i_run_done  (current_state == DRAIN && drain_last && master_hs),
                 .i_busy      (status_busy),
-                .i_load      (feed_active),
+                .i_load      ((current_state == RECV_A) || (current_state == RECV_B)),
                 .i_compute   (pe_enable),
-                .i_writeback (engine_ownd),
-                .i_mem_access(monitor_mem_access),
+                .i_writeback (current_state == DRAIN),
+                .i_mem_access(1'b0),
                 .i_csr_wr    (csr_wr),
                 .i_csr_rd    (csr_rd)
             );
