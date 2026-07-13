@@ -18,26 +18,34 @@ module pe #(
 );
     logic [DATA_WIDTH-1:0] a_r, b_r;
     always_ff @(posedge clk) begin
-        a_r <= i_a;
-        b_r <= i_b;
+        if (i_enable) begin
+            a_r <= i_a;
+            b_r <= i_b;
+        end
     end
 
-    wire a_s_bit = i_signed ? a_r[DATA_WIDTH-1] : 1'd0;
-    wire b_s_bit = i_signed ? b_r[DATA_WIDTH-1] : 1'd0;
+    logic a_s_bit, b_s_bit;
+    assign a_s_bit = i_signed ? i_a[DATA_WIDTH-1] : 1'b0;
+    assign b_s_bit = i_signed ? i_b[DATA_WIDTH-1] : 1'b0;
 
-    wire signed [DATA_WIDTH:0] a_w = {a_s_bit, a_r};
-    wire signed [DATA_WIDTH:0] b_w = {b_s_bit, b_r};
+    logic signed [DATA_WIDTH:0] a_extend, b_extend;
+    assign a_extend = {a_s_bit, i_a};
+    assign b_extend = {b_s_bit, i_b};
 
-    logic signed [2*DATA_WIDTH+1:0] mult_r;    
-    logic signed [ACC_WIDTH-1:0] accumulator;
-        
+    logic signed [2*DATA_WIDTH+1:0] mult_r;
+    logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
+
+    assign mult_r = a_extend * b_extend;
+
+    always_comb begin
+        next_acc = accumulator + ACC_WIDTH'(mult_r);
+    end
+
     always_ff @(posedge clk) begin
         if (!rstn || i_clear) begin
             accumulator <= '0;
-            mult_r <= '0;
         end else if (i_enable) begin
-            mult_r <= a_w * b_w;
-            accumulator <= accumulator + mult_r;
+            accumulator <= next_acc;
         end
     end
 
