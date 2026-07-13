@@ -49,7 +49,6 @@ module systolic_array #(
     // CSR address map
     localparam logic [CSR_ADDR_W-1:0] ADDR_CTRL = 'h00;
     localparam logic [CSR_ADDR_W-1:0] ADDR_STATUS = 'h04;
-    // localparam logic [CSR_ADDR_W-1:0] ADDR_CYCLES = 'h08;
 
     localparam CTRL_SIGNED_BIT = 1;
     localparam STATUS_BUSY_BIT = 0;
@@ -57,15 +56,15 @@ module systolic_array #(
     localparam STATUS_STATE_MSB = 4;
 
     typedef enum logic [2:0] {
-        RECV_A = 3'd0, // idle cum receive a
-        RECV_B = 3'd1,
+        REC_A = 3'd0, // idle cum receive a
+        REC_B = 3'd1,
         CLEAR = 3'd2,
         COMPUTE = 3'd3,
         DRAIN = 3'd4
     } state_t;
     state_t current_state, next_state;
 
-    wire status_busy = (current_state != RECV_A);
+    wire status_busy = (current_state != REC_A);
 
     // stream handshakes
     wire slave_hs = s_tvalid && s_tready;
@@ -101,12 +100,12 @@ module systolic_array #(
     always_comb begin
         next_state = current_state;
         case (current_state)
-            RECV_A:  begin
+            REC_A:  begin
                 if (slave_hs) begin
-                    next_state = RECV_B;
+                    next_state = REC_B;
                 end
             end
-            RECV_B: begin
+            REC_B: begin
                 if (slave_hs) begin
                     next_state = CLEAR;
                 end
@@ -119,16 +118,16 @@ module systolic_array #(
             end
             DRAIN: begin
                 if (drain_last && master_hs) begin
-                     next_state = RECV_A;
+                     next_state = REC_A;
                 end
             end
-            default: next_state = RECV_A; // base idle state
+            default: next_state = REC_A; // base idle state
         endcase
     end
 
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            current_state <= RECV_A;
+            current_state <= REC_A;
         end else begin
             current_state <= next_state;
         end
@@ -141,11 +140,11 @@ module systolic_array #(
             a_r <= '0;
             b_r <= '0;
         end else begin
-            if (current_state == RECV_A && slave_hs) begin
+            if (current_state == REC_A && slave_hs) begin
                 a_r <= s_tdata[PACKED_W-1:0];// register input a 
             end
             
-            if (current_state == RECV_B && slave_hs) begin
+            if (current_state == REC_B && slave_hs) begin
                 b_r <= s_tdata[PACKED_W-1:0]; // registter input b
             end
         end
@@ -160,18 +159,6 @@ module systolic_array #(
             pe_ctrl_signed_r <= csr_wdata[CTRL_SIGNED_BIT];
         end
     end
-
-    // perf counter (unneded i already do a performance counter forgot to remove it)
-    // logic [31:0] run_cycles_r;
-    // always_ff @(posedge clk or negedge rstn) begin
-    //     if (!rstn) begin
-    //         run_cycles_r <= 32'd0;
-    //     end else if (current_state == RECV_A) begin
-    //         run_cycles_r <= 32'd0;
-    //     end else begin
-    //         run_cycles_r <= run_cycles_r + 32'd1;
-    //     end
-    // end
 
     wire pe_clear = (current_state == CLEAR);
     wire pe_enable = (current_state == COMPUTE);
@@ -246,7 +233,7 @@ module systolic_array #(
     wire [RESULT_WIDTH-1:0] drain_res = pe_result_flat[drain_idx_r];
     wire signed [RESULT_WIDTH-1:0] drain_res_s = drain_res;
 
-    assign s_tready = (current_state == RECV_A) || (current_state == RECV_B);
+    assign s_tready = (current_state == REC_A) || (current_state == REC_B);
     assign m_tvalid = (current_state == DRAIN);
     assign m_tlast = (current_state == DRAIN) && drain_last;
     assign m_tdata = pe_ctrl_signed_r ? 32'(drain_res_s) : 32'(drain_res);
@@ -261,7 +248,6 @@ module systolic_array #(
                 ctrl_rdata[STATUS_BUSY_BIT] = status_busy;
                 ctrl_rdata[STATUS_STATE_MSB:STATUS_STATE_LSB] = current_state;
             end
-            // ADDR_CYCLES: ctrl_rdata = run_cycles_r;
             default: ctrl_rdata = 32'd0;
         endcase
     end
@@ -287,10 +273,10 @@ module systolic_array #(
             perf_monitor perf_inst (
                 .clk         (clk),
                 .rstn        (rstn),
-                .i_run_start (current_state == RECV_B && slave_hs),
+                .i_run_start (current_state == REC_B && slave_hs),
                 .i_run_done  (current_state == DRAIN && drain_last && master_hs),
                 .i_busy      (status_busy),
-                .i_load      ((current_state == RECV_A) || (current_state == RECV_B)),
+                .i_load      ((current_state == REC_A) || (current_state == REC_B)),
                 .i_compute   (pe_enable),
                 .i_writeback (current_state == DRAIN),
                 .i_mem_access(1'b0),
