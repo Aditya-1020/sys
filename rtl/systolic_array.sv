@@ -5,8 +5,7 @@ module systolic_array #(
     parameter int unsigned MATRIX_SIZE = 4,
     parameter int unsigned DATA_WIDTH = 8,
     parameter int unsigned RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE),
-    parameter int unsigned PACKED_W = MATRIX_SIZE * MATRIX_SIZE * DATA_WIDTH,
-    parameter bit PERF_COUNTER_EN = 1'b0
+    parameter int unsigned PACKED_W = MATRIX_SIZE * MATRIX_SIZE * DATA_WIDTH
 )(
     input wire clk,
     input wire rstn,
@@ -165,26 +164,6 @@ module systolic_array #(
     assign o_ld_ready = (current_state == LOAD);
     assign o_result_valid = (current_state == HANDOFF);
 
-
-    `ifdef SIM
-    // peroformance counter
-    generate
-        if (PERF_COUNTER_EN) begin : gen_perf_counters
-            perf_monitor perf_inst (
-                .clk         (clk),
-                .rstn        (rstn),
-                .i_run_start (current_state == LOAD && load_hs),
-                .i_run_done  (current_state == HANDOFF && result_hs),
-                .i_busy      ( (current_state != LOAD) ),
-                .i_load      ( (current_state == LOAD) ),
-                .i_compute   (pe_enable),
-                .i_writeback ( (current_state == HANDOFF) ),
-                .i_csr_wr    (1'b0),
-                .i_csr_rd    (1'b0)
-            );
-        end
-    endgenerate
-    `endif
 
 endmodule
 `default_nettype wire
