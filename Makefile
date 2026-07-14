@@ -13,8 +13,9 @@ TOP = tb_systolic_array
 SNAPSHOT = $(TOP)_snap
 
 # make xrun DUMP=1
+# array size
 
-N ?= 4 # array size
+N ?= 4
 DW ?= 8
 SIM_GENERICS = -generic_top "N=$(N)" -generic_top "DW=$(DW)"
 ifeq ($(DUMP),1)
