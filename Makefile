@@ -12,6 +12,15 @@ V_SIM_SRCS = $(V_RTL) $(SV_TB)
 TOP = tb_systolic_array
 SNAPSHOT = $(TOP)_snap
 
+# make xrun DUMP=1
+
+N ?= 4 # array size
+DW ?= 8
+SIM_GENERICS = -generic_top "N=$(N)" -generic_top "DW=$(DW)"
+ifeq ($(DUMP),1)
+  SIM_DEFS = -d DUMP
+endif
+
 SYNTH_TOP = systolic_array
 SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
 CELL_V_DIR = $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog
@@ -42,10 +51,10 @@ $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
 sv2v_rtl: $(V_RTL)
 
 xcompile: $(V_RTL)
-	xvlog -sv $(V_SIM_SRCS)
+	xvlog -sv $(SIM_DEFS) $(V_SIM_SRCS)
 
 xelab: xcompile
-	xelab -debug typical -top $(TOP) -snapshot $(SNAPSHOT)
+	xelab -debug typical -top $(TOP) -snapshot $(SNAPSHOT) $(SIM_GENERICS)
 
 xrun: xelab
 	xsim $(SNAPSHOT) -R
