@@ -17,8 +17,11 @@ module pe #(
     output wire [ACC_WIDTH-1:0] o_psum
 );
     logic [DATA_WIDTH-1:0] a_r, b_r;
-    always_ff @(posedge clk) begin
-        if (!rstn || i_clear) begin
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            a_r <= '0;
+            b_r <= '0;
+        end else if (i_clear) begin
             a_r <= '0;
             b_r <= '0;
         end else if (i_enable) begin
@@ -44,8 +47,10 @@ module pe #(
         next_acc = accumulator + ACC_WIDTH'(mult_r);
     end
 
-    always_ff @(posedge clk) begin
-        if (!rstn || i_clear) begin
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            accumulator <= '0;
+        end else if (i_clear) begin
             accumulator <= '0;
         end else if (i_enable) begin
             accumulator <= next_acc;
