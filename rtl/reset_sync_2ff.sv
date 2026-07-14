@@ -1,9 +1,9 @@
 `default_nettype none
 `timescale 1ps/1ps
 module reset_sync_2ff (
-    input logic i_clk,
-    input logic rstn_src,   // asynchronous active-low reset
-    output logic rstn_sync
+    input wire i_clk,
+    input wire rstn_src,   // asynchronous active-low reset
+    output wire rstn_sync
 );
     logic [1:0] sync_reg;
 

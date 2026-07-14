@@ -2,6 +2,14 @@
 build/
 runs/
 obj_dir/
+
+# xsim
+xsim.dir/
+*.wdb
+*.jou
+*.pb
+*.log
+xsim_*.backup.*
 synth/*.json
 synth/*.rpt
 synth/*.v
