@@ -9,14 +9,13 @@ module systolic_array #(
 )(
     input wire clk,
     input wire rstn,
-    input  wire i_ld_valid,
-    output wire o_ld_ready,
+    input  wire i_start,
     input  wire [PACKED_W-1:0] i_ld_a,
     input  wire [PACKED_W-1:0] i_ld_b,
     input  wire i_pe_sign_en, // csr controlled
-    input  wire i_result_ready,
-    output wire o_result_valid,
-    output wire [(MATRIX_SIZE*MATRIX_SIZE)-1:0][RESULT_WIDTH-1:0] o_result_data
+    output wire [(MATRIX_SIZE*MATRIX_SIZE)-1:0][RESULT_WIDTH-1:0] o_result_data,
+    output wire o_done,
+    output wire o_busy
 );
     localparam int unsigned ARRAY_ROWS = MATRIX_SIZE;
     localparam int unsigned ARRAY_COLS = MATRIX_SIZE;
@@ -30,14 +29,11 @@ module systolic_array #(
     typedef enum logic [1:0] {
         LOAD,  // idle cum receive a and b
         CLEAR,
-        COMPUTE,
-        HANDOFF
+        COMPUTE
     } state_t;
     state_t current_state, next_state;
 
-    //wire status_busy (current_state != LOAD);
-    wire load_hs = i_ld_valid && o_ld_ready;
-    wire result_hs = o_result_valid && i_result_ready;
+    wire job_start = (current_state == LOAD) && i_start; // also clears the sticky done
 
     // compute phase counter
     logic [COUNT_WIDTH-1:0] cycle_count_r;
@@ -57,18 +53,13 @@ module systolic_array #(
         next_state = current_state;
         case (current_state)
             LOAD: begin
-                if (load_hs) begin
+                if (i_start) begin
                     next_state = CLEAR;
                 end
             end
             CLEAR: next_state = COMPUTE;
             COMPUTE: begin
                 if (compute_last) begin
-                    next_state = HANDOFF;
-                end
-            end
-            HANDOFF: begin
-                if (result_hs) begin
                     next_state = LOAD;
                 end
             end
@@ -84,18 +75,30 @@ module systolic_array #(
         end
     end
 
+    // sticky done
+    logic done_r;
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            done_r <= 1'b0;
+        end else if (job_start) begin
+            done_r <= 1'b0; // clear on new job
+        end else if (compute_last) begin
+            done_r <= 1'b1; // latch
+        end
+    end
+
+    assign o_done = done_r;
+    assign o_busy = (current_state != LOAD);
+
     // input register file (operands)
     logic [PACKED_W-1:0] a_r, b_r; // storeing input matrix
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
             a_r <= '0;
             b_r <= '0;
-        end else if (current_state == LOAD && load_hs) begin
+        end else if (job_start) begin
             a_r <= i_ld_a;
             b_r <= i_ld_b;
-        end else begin
-            a_r <= a_r;
-            b_r <= b_r;
         end
     end
 
@@ -116,7 +119,7 @@ module systolic_array #(
                 pe #(
                     .DATA_WIDTH(DATA_WIDTH),
                     .ACC_WIDTH (RESULT_WIDTH)
-                 ) pe (
+                ) pe_inst (
                     .clk     (clk),
                     .rstn    (rstn),
                     .i_enable(pe_enable),
@@ -151,12 +154,12 @@ module systolic_array #(
     generate
         for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed
             wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
-            wire feed_window = (elm_a < COUNT_WIDTH'(ARRAY_ROWS));
-            assign pe_a_in[r][0] = (pe_enable && feed_window) ? (a_r[DATA_WIDTH*(INNER_DIM*elm_a + r) +: DATA_WIDTH]) : '0;
+            wire feed_window = (elm_a < COUNT_WIDTH'(INNER_DIM));
+            wire [COUNT_WIDTH-1:0] a_idx = feed_window ? elm_a : '0;
+            assign pe_a_in[r][0] = (pe_enable && feed_window) ? a_r[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
         end
     endgenerate
 
-    // staggered results c[m][c] at ccycle m + array_rows + c
     logic [RESULT_WIDTH-1:0] result_r [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     // c[m][j] is valid on the drain for one cycle (m+N+j); latched to presetn in parallel
     always_ff @(posedge clk or negedge rstn) begin
@@ -184,9 +187,6 @@ module systolic_array #(
             end
         end
     endgenerate
-
-    assign o_ld_ready = (current_state == LOAD);
-    assign o_result_valid = (current_state == HANDOFF);
 
 endmodule
 `default_nettype wire
