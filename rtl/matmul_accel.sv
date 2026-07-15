@@ -117,7 +117,7 @@ module matmul_accel #(
     end
 
     // config and operand write
-    always_ff @(posedge clk or negedge rstn) begin
+    always_ff @(posedge clk) begin
         if (csr_wr) begin
             if (in_a) begin
                 a_buf[WORD_W*ab_idx +: WORD_W] <= csr_wdata[WORD_W-1:0];
