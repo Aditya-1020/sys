@@ -25,7 +25,7 @@ module systolic_array #(
     localparam int unsigned PE_LATENCY = 1;
     localparam int unsigned TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY; // 11 if N=4
     localparam int unsigned COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
-
+    
     typedef enum logic [1:0] {
         LOAD,  // idle cum receive a and b
         CLEAR,
@@ -76,14 +76,21 @@ module systolic_array #(
     end
 
     // sticky done
-    logic done_r;
+    logic done_r, done_st;
+    always_comb begin
+        done_st = done_r;
+        if (job_start) begin
+            done_st = 1'b0; // clear on new job
+        end else if (compute_last) begin
+            done_st = 1'b1; // latch
+        end
+    end
+    
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
             done_r <= 1'b0;
-        end else if (job_start) begin
-            done_r <= 1'b0; // clear on new job
-        end else if (compute_last) begin
-            done_r <= 1'b1; // latch
+        end else begin
+            done_r <= done_st;
         end
     end
 
