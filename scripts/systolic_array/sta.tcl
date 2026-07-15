@@ -13,7 +13,6 @@ check_setup
 report_worst_slack -max
 report_worst_slack -min
 report_tns
-report_check_types -max_transition -max_fanout -violators
 
 # violations only, compact
 report_checks -path_delay min_max -format end -slack_max 0 -group_count 5
