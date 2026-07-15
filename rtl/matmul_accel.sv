@@ -149,9 +149,9 @@ module matmul_accel #(
         end
     end
 
-    always_ff @(posedge clk or negedge rstn) begin
+    always_ff @(posedge clk) begin
         if (result_taken) begin
-            for (int i = 0; i < MATRIX_ELEMENTS; i++) begin
+            for (int unsigned i = 0; i < MATRIX_ELEMENTS; i++) begin
                 c_buf[i]  <= core_result_data[i];
             end
         end

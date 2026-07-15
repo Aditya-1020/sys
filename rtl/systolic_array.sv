@@ -33,8 +33,6 @@ module systolic_array #(
     } state_t;
     state_t current_state, next_state;
 
-    wire job_start = (current_state == LOAD) && i_start; // also clears the sticky done
-
     // compute phase counter
     logic [COUNT_WIDTH-1:0] cycle_count_r;
     wire compute_last = (current_state == COMPUTE) && (cycle_count_r == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
@@ -74,6 +72,9 @@ module systolic_array #(
             current_state <= next_state;
         end
     end
+    
+    wire job_start;
+    assign job_start = (current_state == LOAD) && i_start; // also clears the sticky done
 
     // sticky done
     logic done_r, done_st;
@@ -99,11 +100,8 @@ module systolic_array #(
 
     // input register file (operands)
     logic [PACKED_W-1:0] a_r, b_r; // storeing input matrix
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            a_r <= '0;
-            b_r <= '0;
-        end else if (job_start) begin
+    always_ff @(posedge clk) begin
+       if (job_start) begin
             a_r <= i_ld_a;
             b_r <= i_ld_b;
         end
@@ -186,16 +184,10 @@ module systolic_array #(
 
     logic [RESULT_WIDTH-1:0] result_r [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     // c[m][j] is valid on the drain for one cycle (m+N+j); latched to presetn in parallel
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            for (int m = 0; m < ARRAY_ROWS; m++) begin
-                for (int j = 0; j < ARRAY_COLS; j++) begin
-                    result_r[m][j] <= '0;
-                end
-            end
-        end else if (pe_enable) begin
-            for (int m = 0; m < ARRAY_ROWS; m++) begin
-                for (int j = 0; j < ARRAY_COLS; j++) begin
+    always_ff @(posedge clk) begin
+        if (pe_enable) begin
+            for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
+                for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
                     if (cycle_count_r == COUNT_WIDTH'(m + ARRAY_ROWS + j)) begin
                         result_r[m][j] <= pe_psum_out[ARRAY_ROWS-1][j];
                     end

@@ -8,10 +8,11 @@ module reset_sync_2ff (
     logic [1:0] sync_reg;
 
     always_ff @(posedge i_clk or negedge rstn_src) begin
-        if (!rstn_src)
+        if (!rstn_src) begin
             sync_reg <= 2'b00;
-        else
+        end else begin
             sync_reg <= {sync_reg[0], 1'b1};
+        end
     end
 
     assign rstn_sync = sync_reg[1];

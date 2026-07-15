@@ -18,10 +18,8 @@ module pe #(
     output wire [ACC_WIDTH-1:0] o_psum
 );
     logic [DATA_WIDTH-1:0] a_r;
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            a_r <= '0;
-        end else if (i_clear) begin
+    always_ff @(posedge clk) begin
+        if (i_clear) begin
             a_r <= '0;
         end else if (i_enable) begin
             a_r <= i_a;
@@ -29,15 +27,13 @@ module pe #(
     end
 
     logic [DATA_WIDTH-1:0] w_r;
-    always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            w_r <= '0;
-        end else if (i_w_load) begin
+    always_ff @(posedge clk) begin
+        if (i_w_load) begin
             w_r <= i_b;
         end
     end
 
-    logic a_s_bit, w_s_bit;
+    wire a_s_bit, w_s_bit;
     assign a_s_bit = i_signed ? i_a[DATA_WIDTH-1] : 1'b0;
     assign w_s_bit = i_signed ? w_r[DATA_WIDTH-1] : 1'b0;
 
@@ -54,9 +50,7 @@ module pe #(
     end
 
     always_ff @(posedge clk or negedge rstn) begin
-        if (!rstn) begin
-            accumulator <= '0;
-        end else if (i_clear) begin
+        if (i_clear) begin
             accumulator <= '0;
         end else if (i_enable) begin
             accumulator <= next_acc;
