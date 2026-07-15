@@ -49,7 +49,7 @@ module pe #(
         next_acc = signed'(i_psum) + ACC_WIDTH'(mult_r);
     end
 
-    always_ff @(posedge clk or negedge rstn) begin
+    always_ff @(posedge clk) begin
         if (i_clear) begin
             accumulator <= '0;
         end else if (i_enable) begin

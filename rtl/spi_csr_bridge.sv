@@ -68,11 +68,11 @@ module spi_csr_bridge #(
             bit_cnt_r <= '0;
             cmd_r <= '0;
             addr_r <= '0;
-            wdata_r <= '0;
-        end else if (!selected) begin
-            bit_cnt_r <= '0; // frame resync usingcs high
+        end else if (!selected) begin // frame resync usingcs high
+            bit_cnt_r <= '0;
         end else if (sclk_rise && frame_open) begin
             bit_cnt_r <= bit_cnt_r + 1'b1;
+            
             if (in_cmd_phase) begin
                 cmd_r <= {cmd_r[CMD_BITS-2:0], mosi_sync_r[1]};
             end else if (in_addr_phase) begin

@@ -1,4 +1,5 @@
-create_clock -name SYS_CLK -period 13.33 [get_ports clk]
+# 13.33 = 75Mhz
+create_clock -name SYS_CLK -period 10 [get_ports clk]
 set_clock_uncertainty 0.25 [get_clocks SYS_CLK]
 
 # data input list except the clock and reset pins
