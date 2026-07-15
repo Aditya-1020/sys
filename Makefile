@@ -33,15 +33,23 @@ GLS_CELL_DIR = $(BUILD_DIR)/gls_cells
 GLS_CELLS = $(GLS_CELL_DIR)/primitives.v $(GLS_CELL_DIR)/sky130_fd_sc_hd.v
 GLS_SNAPSHOT = $(TOP)_gls_snap
 
-# STA: scripts in scripts/<module>/{synth,sta}.tcl, sdc in constraints/<module>.sdc
+# ----------------------------------------------------------------------------
+# Liberty files
+# Synthesis gets a trimmed lib (lpflow_*/probe_* removed) so abc can't infer
+# power-gating cells. STA keeps the full lib; the netlist won't contain them.
+# ----------------------------------------------------------------------------
 PDK_ROOT ?= $(HOME)/eda/.volare
-STA_TOP ?= pe
 LIB_DIR ?= $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/lib
-TT_STA_LIB ?= $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
-TT_SYNTH_LIB ?= $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
+FULL_LIB := $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
+TRIM_LIB := $(BUILD_DIR)/sky130_fd_sc_hd__tt_025C_1v80.trimmed.lib
 
+TT_SYNTH_LIB := $(TRIM_LIB)
+TT_STA_LIB := $(FULL_LIB)
 export TT_STA_LIB
 export TT_SYNTH_LIB
+
+# STA: scripts in scripts/<module>/{synth,sta}.tcl, sdc in constraints/<module>.sdc
+STA_TOP ?= pe
 
 .PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl
 
@@ -49,6 +57,9 @@ all: xrun
 
 $(VERILOG_SV2V) $(BUILD_DIR):
 	mkdir -p $@
+
+$(TRIM_LIB): $(FULL_LIB) scripts/filter_lib.py | $(BUILD_DIR)
+	python3 scripts/filter_lib.py $< $@
 
 $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
 	echo '`timescale 1ps/1ps' > $@
@@ -68,7 +79,7 @@ xrun: xelab
 xgui: xelab
 	xsim $(SNAPSHOT) -gui &
 
-$(SYNTH_V): $(V_RTL) scripts/$(SYNTH_TOP)/synth.tcl | $(BUILD_DIR)
+$(SYNTH_V): $(V_RTL) $(TRIM_LIB) scripts/$(SYNTH_TOP)/synth.tcl | $(BUILD_DIR)
 	yosys -c scripts/$(SYNTH_TOP)/synth.tcl
 
 synth: $(SYNTH_V)
@@ -87,7 +98,7 @@ wave:
 	gtkwave dump.vcd &
 
 # make sta STA_TOP=module_name (change lib in TT_STA_LIB if needed)
-sta: $(VERILOG_SV2V)/$(STA_TOP).v | $(BUILD_DIR)
+sta: $(V_RTL) $(TRIM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tcl $(CONSTRAINTS_DIR)/$(STA_TOP).sdc | $(BUILD_DIR)
 	yosys -c scripts/$(STA_TOP)/synth.tcl
 	sta   scripts/$(STA_TOP)/sta.tcl
 
