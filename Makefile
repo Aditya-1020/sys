@@ -17,7 +17,10 @@ SNAPSHOT = $(TOP)_snap
 
 N ?= 4
 DW ?= 8
-SIM_GENERICS = -generic_top "N=$(N)" -generic_top "DW=$(DW)"
+# per top, xelab errors on a generic the top does not declare.
+# tb_matmul_accel gets none, its sizes are fixed inside matmul_accel
+SIM_GENERICS_tb_systolic_array = -generic_top "N=$(N)" -generic_top "DW=$(DW)"
+SIM_GENERICS = $(SIM_GENERICS_$(TOP))
 ifeq ($(DUMP),1)
   SIM_DEFS = -d DUMP
 endif
@@ -35,8 +38,10 @@ PDK_ROOT ?= $(HOME)/eda/.volare
 STA_TOP ?= pe
 LIB_DIR ?= $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/lib
 TT_STA_LIB ?= $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
+TT_SYNTH_LIB ?= $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
 
 export TT_STA_LIB
+export TT_SYNTH_LIB
 
 .PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl
 
