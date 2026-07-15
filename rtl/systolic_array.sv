@@ -118,6 +118,23 @@ module systolic_array #(
     wire [DATA_WIDTH-1:0] pe_w_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     wire [RESULT_WIDTH-1:0] pe_psum_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     wire [RESULT_WIDTH-1:0] pe_psum_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    
+    // col c control delayed by c
+    wire [MATRIX_SIZE-1:0] pe_en_col, pe_clr_col;
+    logic [MATRIX_SIZE-1:1] en_pipe_q, clr_pipe_q;
+
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            en_pipe_q <= '0;
+            clr_pipe_q <= '0;
+        end else begin
+            en_pipe_q <= pe_en_col[MATRIX_SIZE-2:0];
+            clr_pipe_q <= pe_clr_col[MATRIX_SIZE-2:0];
+        end
+    end
+
+    assign pe_en_col = {en_pipe_q, pe_enable};
+    assign pe_clr_col = {clr_pipe_q, pe_clear};
 
     genvar r, c;
     generate
@@ -129,8 +146,8 @@ module systolic_array #(
                 ) pe_inst (
                     .clk     (clk),
                     .rstn    (rstn),
-                    .i_enable(pe_enable),
-                    .i_clear (pe_clear),
+                    .i_enable(pe_en_col[c]),
+                    .i_clear (pe_clr_col[c]),
                     .i_signed(i_pe_sign_en),
                     .i_w_load(pe_w_load),
                     .i_a     (pe_a_in[r][c]),
