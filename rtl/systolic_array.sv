@@ -20,13 +20,13 @@ module systolic_array #(
 );
     localparam int unsigned ARRAY_ROWS = MATRIX_SIZE;
     localparam int unsigned ARRAY_COLS = MATRIX_SIZE;
-    localparam int unsigned INNER_DIM = MATRIX_SIZE; // K MACs per PE
-    
+    localparam int unsigned INNER_DIM = MATRIX_SIZE; // K MACs per column
+
     localparam int unsigned FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
     localparam int unsigned PE_LATENCY = 1;
     localparam int unsigned TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY; // 11 if N=4
     localparam int unsigned COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
-    
+
     typedef enum logic [1:0] {
         LOAD,  // idle cum receive a and b
         CLEAR,
@@ -76,7 +76,6 @@ module systolic_array #(
         endcase
     end
 
-
     always_ff @(posedge clk or negedge rstn) begin
         if (!rstn) begin
             current_state <= LOAD;
@@ -102,12 +101,13 @@ module systolic_array #(
 
     wire pe_clear = (current_state == CLEAR);
     wire pe_enable = (current_state == COMPUTE);
+    wire pe_w_load = (current_state == CLEAR);
 
     wire [DATA_WIDTH-1:0] pe_a_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-    wire [DATA_WIDTH-1:0] pe_b_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
     wire [DATA_WIDTH-1:0] pe_a_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-    wire [DATA_WIDTH-1:0] pe_b_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-    wire [RESULT_WIDTH-1:0] pe_result [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [DATA_WIDTH-1:0] pe_w_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [RESULT_WIDTH-1:0] pe_psum_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    wire [RESULT_WIDTH-1:0] pe_psum_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 
     genvar r, c;
     generate
@@ -122,24 +122,27 @@ module systolic_array #(
                     .i_enable(pe_enable),
                     .i_clear (pe_clear),
                     .i_signed(i_pe_sign_en),
+                    .i_w_load(pe_w_load),
                     .i_a     (pe_a_in[r][c]),
-                    .i_b     (pe_b_in[r][c]),
+                    .i_b     (pe_w_in[r][c]),
+                    .i_psum  (pe_psum_in[r][c]),
                     .o_a     (pe_a_out[r][c]),
-                    .o_b     (pe_b_out[r][c]),
-                    .o_psum  (pe_result[r][c])
+                    .o_psum  (pe_psum_out[r][c])
                 );
+
+                // stationary weight from b_r
+                assign pe_w_in[r][c] = b_r[DATA_WIDTH*(ARRAY_COLS*r + c) +: DATA_WIDTH];
 
                 // a to right b to bottom
                 if (c < ARRAY_COLS-1) begin : gen_a_flow
                     assign pe_a_in[r][c+1] = pe_a_out[r][c];
                 end
 
-                if (r < ARRAY_ROWS-1) begin : gen_b_flow
-                    assign pe_b_in[r+1][c] = pe_b_out[r][c];
+                if (r == 0) begin : gen_psum_head
+                    assign pe_psum_in[r][c] = '0;
+                end else begin : gen_psum_flow
+                    assign pe_psum_in[r][c] = pe_psum_out[r-1][c];
                 end
-
-                // row-major flatten straight into the result bus
-                assign o_result_data[r*ARRAY_COLS + c] = pe_result[r][c];
             end
         end
     endgenerate
@@ -148,22 +151,42 @@ module systolic_array #(
     generate
         for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed
             wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
-            wire feed_window = (elm_a < COUNT_WIDTH'(INNER_DIM));
-            assign pe_a_in[r][0] = (pe_enable && feed_window) ? (a_r[DATA_WIDTH*(INNER_DIM*r + int'(elm_a)) +: DATA_WIDTH]) : '0;
+            wire feed_window = (elm_a < COUNT_WIDTH'(ARRAY_ROWS));
+            assign pe_a_in[r][0] = (pe_enable && feed_window) ? (a_r[DATA_WIDTH*(INNER_DIM*elm_a + r) +: DATA_WIDTH]) : '0;
         end
     endgenerate
 
+    // staggered results c[m][c] at ccycle m + array_rows + c
+    logic [RESULT_WIDTH-1:0] result_r [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+    // c[m][j] is valid on the drain for one cycle (m+N+j); latched to presetn in parallel
+    always_ff @(posedge clk or negedge rstn) begin
+        if (!rstn) begin
+            for (int m = 0; m < ARRAY_ROWS; m++) begin
+                for (int j = 0; j < ARRAY_COLS; j++) begin
+                    result_r[m][j] <= '0;
+                end
+            end
+        end else if (pe_enable) begin
+            for (int m = 0; m < ARRAY_ROWS; m++) begin
+                for (int j = 0; j < ARRAY_COLS; j++) begin
+                    if (cycle_count_r == COUNT_WIDTH'(m + ARRAY_ROWS + j)) begin
+                        result_r[m][j] <= pe_psum_out[ARRAY_ROWS-1][j];
+                    end
+                end
+            end
+        end
+    end
+
     generate
-        for (c = 0; c < ARRAY_COLS; c= c + 1) begin : gen_b_feed
-            wire [COUNT_WIDTH-1:0] elm_b = cycle_count_r - COUNT_WIDTH'(c);
-            wire feed_window = (elm_b < COUNT_WIDTH'(INNER_DIM));
-            assign pe_b_in[0][c] = (pe_enable && feed_window) ? (b_r[DATA_WIDTH*(ARRAY_COLS*int'(elm_b) + c) +: DATA_WIDTH]) : '0;
+        for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_result_row
+            for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_result_col
+                assign o_result_data[r*ARRAY_COLS + c] = result_r[r][c];
+            end
         end
     endgenerate
 
     assign o_ld_ready = (current_state == LOAD);
     assign o_result_valid = (current_state == HANDOFF);
-
 
 endmodule
 `default_nettype wire
