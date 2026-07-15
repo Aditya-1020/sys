@@ -5,7 +5,7 @@ module tb_systolic_array;
     parameter int unsigned DW = 8;
     localparam int unsigned RW = (2*DW) + $clog2(N);
     localparam int unsigned PW = N*N*DW;
-    localparam int unsigned LATENCY = 3*N + 1;
+    localparam int unsigned LATENCY = 3*N;
     localparam int unsigned CASES = 12;
     localparam int UNS_MAX = (1 << DW) - 1;
     localparam int SGN_MAX = (1 << (DW-1)) - 1;
@@ -14,7 +14,9 @@ module tb_systolic_array;
     logic clk = 1'b0;
     always #5 clk = ~clk;
 
-    logic rstn, i_ld_valid, o_ld_ready, i_pe_sign_en, i_result_ready, o_result_valid;
+    logic rstn, i_start;
+    logic o_done, o_busy;
+    logic i_pe_sign_en;
     logic [PW-1:0] i_ld_a, i_ld_b;
     logic [N*N-1:0][RW-1:0] o_result_data;
 
@@ -28,14 +30,13 @@ module tb_systolic_array;
 `endif
         .clk           (clk),
         .rstn          (rstn),
-        .i_ld_valid    (i_ld_valid),
-        .o_ld_ready    (o_ld_ready),
         .i_ld_a        (i_ld_a),
         .i_ld_b        (i_ld_b),
         .i_pe_sign_en  (i_pe_sign_en),
-        .i_result_ready(i_result_ready),
-        .o_result_valid(o_result_valid),
-        .o_result_data (o_result_data)
+        .i_start       (i_start),
+        .o_result_data (o_result_data),
+        .o_done        (o_done),
+        .o_busy        (o_busy)
     );
 
     int A [N][N], B [N][N], C [N][N];
@@ -66,39 +67,54 @@ module tb_systolic_array;
     task automatic load;
         @(posedge clk);
         i_pe_sign_en <= sign;
-        for (int i = 0; i < N; i++)
-            for (int j = 0; j < N; j++) begin
+
+        for (int i = 0; i < N; i++) begin
+           for (int j = 0; j < N; j++) begin
                 i_ld_a[DW*(N*i + j) +: DW] <= A[i][j][DW-1:0];
                 i_ld_b[DW*(N*i + j) +: DW] <= B[i][j][DW-1:0];
             end
-        i_ld_valid <= 1'b1;
-        do @(posedge clk); while (!o_ld_ready);
-        i_ld_valid <= 1'b0;
+        end
+        i_start <= 1'b1;
+        @(posedge clk);
+        i_start <= 1'b0;
+    endtask
+
+    task automatic reset_dut;
+        rstn <= 1'b0;
+        i_ld_a <= '0;
+        i_ld_b <= '0;
+        i_pe_sign_en <= 1'b0;
+        i_start <= 1'b0;
+        repeat (4) @(posedge clk);
+        @(negedge clk);
+        rstn <= 1'b1;
+        repeat (2) @(posedge clk);
+        @(negedge clk);
+    endtask
+    
+    task automatic wait_done(output int cycles);
+        cycles = 0;
+        forever begin
+            @(posedge clk);
+            cycles++;
+            @(negedge clk);
+            if (o_done) break;
+        end
     endtask
 
     int lat;
-    logic [N*N-1:0][RW-1:0] snap;
 
     initial begin
 `ifdef DUMP
         $dumpfile("dump.vcd");
         $dumpvars(0, tb_systolic_array);
 `endif
-        $display("SYSTOIC ARRAY TB: N=%0d DW=%0d RW=%0d latency=%0d", N, DW, RW, LATENCY);
+        $display("SYSTOLIC ARRAY TB: N=%0d DW=%0d RW=%0d latency=%0d", N, DW, RW, LATENCY);
 
-        rstn <= 1'b0;
-        i_ld_valid <= 1'b0;
-        i_ld_a <= '0;
-        i_ld_b <= '0;
-        i_pe_sign_en <= 1'b0;
-        i_result_ready <= 1'b0;
-        repeat (4) @(posedge clk);
-        @(negedge clk);
-        rstn <= 1'b1;
-        repeat (2) @(posedge clk);
+        reset_dut();
 
-        check("idle ready", o_ld_ready, 1'b1);
-        check("idle valid", o_result_valid, 1'b0);
+        check("idle busy", o_busy, 1'b0);
+        check("idle done", o_done, 1'b0);
 
         for (int t = 0; t < CASES; t++) begin
             sign = (t >= 4);
@@ -134,31 +150,14 @@ module tb_systolic_array;
 
             matmul();
             load();
-
-            lat = 0;
-            while (!o_result_valid) begin
-                @(posedge clk);
-                lat++;
-            end
+            wait_done(lat);
             check($sformatf("t%0d latency", t), lat, LATENCY);
 
-            // back pressure
-            if (t % 2) begin
-                snap = o_result_data;
-                repeat (3) @(posedge clk);
-                check($sformatf("t%0d held", t), o_result_valid && (o_result_data === snap), 1'b1);
+            for (int i = 0; i < N; i++) begin
+                for (int j = 0; j < N; j++) begin
+                    check($sformatf("t%0d C[%0d][%0d]", t, i, j), sign ? int'($signed(o_result_data[i*N + j])) : int'(o_result_data[i*N + j]), C[i][j]);
+                end
             end
-
-            // compare at full width, so a too-narrow accumulator cannot wrap on
-            // both sides and hide
-            for (int i = 0; i < N; i++)
-                for (int j = 0; j < N; j++)
-                    check($sformatf("t%0d C[%0d][%0d]", t, i, j), sign ? int'($signed(o_result_data[i*N + j])) : int'(o_result_data[i*N + j]),
-                          C[i][j]);
-
-            i_result_ready <= 1'b1;
-            @(posedge clk);
-            i_result_ready <= 1'b0;
         end
 
         $display("RESULT: %0d passed, %0d failed ",pass, fail);
