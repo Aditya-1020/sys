@@ -19,9 +19,7 @@ module pe #(
 );
     logic [DATA_WIDTH-1:0] a_r;
     always_ff @(posedge clk) begin
-        if (i_clear) begin
-            a_r <= '0;
-        end else if (i_enable) begin
+        if (i_enable) begin
             a_r <= i_a;
         end
     end

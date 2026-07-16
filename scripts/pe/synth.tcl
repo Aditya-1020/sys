@@ -1,8 +1,6 @@
 yosys -import
-set libfile $::env(TT_STA_LIB)
-
-yosys -import
 set libfile $::env(TT_SYNTH_LIB)
+
 read_verilog verilog_sv2v/pe.v
 synth -top pe -flatten
 opt -full
