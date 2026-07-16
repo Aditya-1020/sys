@@ -73,14 +73,11 @@ module systolic_array #(
         end
     end
     
-    wire job_start;
-    assign job_start = (current_state == LOAD) && i_start; // also clears the sticky done
-
     // sticky done
     logic done_r, done_st;
     always_comb begin
         done_st = done_r;
-        if (job_start) begin
+        if ((current_state == LOAD) && i_start) begin
             done_st = 1'b0; // clear on new job
         end else if (compute_last) begin
             done_st = 1'b1; // latch
@@ -97,15 +94,6 @@ module systolic_array #(
 
     assign o_done = done_r;
     assign o_busy = (current_state != LOAD);
-
-    // input register file (operands)
-    logic [PACKED_W-1:0] a_r, b_r; // storeing input matrix
-    always_ff @(posedge clk) begin
-       if (job_start) begin
-            a_r <= i_ld_a;
-            b_r <= i_ld_b;
-        end
-    end
 
     wire pe_clear = (current_state == CLEAR);
     wire pe_enable = (current_state == COMPUTE);
@@ -156,7 +144,7 @@ module systolic_array #(
                 );
 
                 // stationary weight from b_r
-                assign pe_w_in[r][c] = b_r[DATA_WIDTH*(ARRAY_COLS*r + c) +: DATA_WIDTH];
+                assign pe_w_in[r][c] = i_ld_b[DATA_WIDTH*(ARRAY_COLS*r + c) +: DATA_WIDTH];
 
                 // a to right b to bottom
                 if (c < ARRAY_COLS-1) begin : gen_a_flow
@@ -178,7 +166,7 @@ module systolic_array #(
             wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
             wire feed_window = (elm_a < COUNT_WIDTH'(INNER_DIM));
             wire [COUNT_WIDTH-1:0] a_idx = feed_window ? elm_a : '0;
-            assign pe_a_in[r][0] = (pe_enable && feed_window) ? a_r[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
+            assign pe_a_in[r][0] = (pe_enable && feed_window) ? i_ld_a[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
         end
     endgenerate
 
