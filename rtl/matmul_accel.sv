@@ -67,7 +67,7 @@ module matmul_accel #(
     systolic_array #(
         .MATRIX_SIZE     (MATRIX_SIZE),
         .DATA_WIDTH      (DATA_WIDTH)
-    ) core_inst (
+    ) u_systolic (
         .clk           (clk),
         .rstn          (rstn),
         .i_ld_a        (a_buf),
@@ -88,6 +88,13 @@ module matmul_accel #(
 
     wire start_cmd = csr_wr && (csr_addr == ADDR_CTRL) && csr_wdata[CTRL_START_BIT] && !busy;
     wire result_taken = (current_wstate == W_WAIT) && core_done;
+    
+    // ~ this brought up -0.403 (r2r) slack to 6.303 meeting timing 
+    // keeping it out to test if post placement fixes it instead of adding another register
+    // logic result_taken_r; 
+    // always_ff @(posedge clk) begin
+    //     result_taken_r <= (current_wstate == W_WAIT) && core_done;
+    // end
 
     // next state logic
     always_comb begin

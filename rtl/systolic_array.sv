@@ -23,7 +23,9 @@ module systolic_array #(
 
     localparam int unsigned FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
     localparam int unsigned PE_LATENCY = 1;
-    localparam int unsigned TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY; // 11 if N=4
+    localparam int unsigned FEED_LATENCY = 1; // --
+    localparam int unsigned TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY; 
+    // localparam int unsigned TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + PE_LATENCY; // 11 if N=4
     localparam int unsigned COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
     
     typedef enum logic [1:0] {
@@ -129,7 +131,7 @@ module systolic_array #(
                 pe #(
                     .DATA_WIDTH(DATA_WIDTH),
                     .ACC_WIDTH (RESULT_WIDTH)
-                ) pe_inst (
+                ) u_pe (
                     .clk     (clk),
                     .rstn    (rstn),
                     .i_enable(pe_en_col[c]),
@@ -166,7 +168,16 @@ module systolic_array #(
             wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
             wire feed_window = (elm_a < COUNT_WIDTH'(INNER_DIM));
             wire [COUNT_WIDTH-1:0] a_idx = feed_window ? elm_a : '0;
-            assign pe_a_in[r][0] = (pe_enable && feed_window) ? i_ld_a[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
+            logic [DATA_WIDTH-1:0] pe_a_in_r;
+            always_ff @(posedge clk) begin
+                if (pe_enable && feed_window) begin
+                    pe_a_in_r <= i_ld_a[DATA_WIDTH*(INNER_DIM*a_idx + r)+: DATA_WIDTH];
+                end else begin
+                    pe_a_in_r <= '0;
+                end
+            end
+            assign pe_a_in[r][0] = pe_a_in_r;
+            // assign pe_a_in[r][0] = (pe_enable && feed_window) ? i_ld_a[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
         end
     endgenerate
 
@@ -176,7 +187,7 @@ module systolic_array #(
         if (pe_enable) begin
             for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
                 for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
-                    if (cycle_count_r == COUNT_WIDTH'(m + ARRAY_ROWS + j)) begin
+                    if (cycle_count_r == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY)) begin
                         result_r[m][j] <= pe_psum_out[ARRAY_ROWS-1][j];
                     end
                 end
