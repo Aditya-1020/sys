@@ -27,3 +27,8 @@
 
 Reference: N=2 worst reg2reg = +5.39 (PE MAC chain, ~20 stages, unchanged by array size)
 
+---
+- Check:`wire result_taken = (current_wstate == W_WAIT) && core_done;`
+    - For its Post placement timing delay
+    - currently its -0.403 (r2r) slack but registering brought up the slack to 6.303
+

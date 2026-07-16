@@ -1,10 +1,10 @@
 # LibreLane config - systolic
 # Start conservative; tighten CLOCK_PERIOD only after first clean run.
 DESIGN_NAME: "systolic"
-VERILOG_FILES: dir::rtl/*.sv
+VERILOG_FILES: dir::verilog_sv2v/*.sv # make sv2v_rtl before running flow
 
 CLOCK_PORT: "clk"
-CLOCK_PERIOD: 15.0          # ns - ~66 MHz starting point on sky130; tighten later
+CLOCK_PERIOD: 15.0 # ns - ~66 MHz starting point on sky130; tighten later
 
 FP_CORE_UTIL: 45            # 40–55 is safe; >65 invites congestion/DRC
 PL_TARGET_DENSITY_PCT: 50
