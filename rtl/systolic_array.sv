@@ -199,7 +199,6 @@ module systolic_array #(
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_result_row
 			for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_result_col
-				// assign o_result_data[r*ARRAY_COLS + c] = result_r[r][c];
 				assign o_result_data[RESULT_WIDTH*(r*ARRAY_COLS + c) +: RESULT_WIDTH] = result_r[r][c];
 			end
 		end
