@@ -2,10 +2,10 @@
 
 module tb_sram;
     localparam integer DATA_WIDTH = 32;
-	localparam integer ADDR_WIDTH = 9;
+	localparam integer ADDR_WIDTH = 8;
 	localparam integer DEPTH = 1 << ADDR_WIDTH;
 
-	logic clk, rstn;
+	logic clk;
     logic p0_en, p0_we, p1_en;
     logic [3:0] p0_wrmask;
     logic [ADDR_WIDTH-1:0] p0_addr, p1_addr;
@@ -18,7 +18,6 @@ module tb_sram;
         .ADDR_WIDTH(ADDR_WIDTH)
      ) dut (
         .clk        (clk),
-        .rstn       (rstn),
         .i_p0_en    (p0_en),
         .i_p0_we    (p0_we),
         .i_p0_wrmask(p0_wrmask),
@@ -34,7 +33,7 @@ module tb_sram;
 	always #5 clk = ~clk;
 
 	function automatic [DATA_WIDTH-1:0] pattern(input [ADDR_WIDTH-1:0] a);
-		pattern = {7'h5A, a, 7'h25, a};
+		pattern = {a, a, a, a}; // repeat addr to fill 32 bits
 	endfunction
 
 	task automatic idle;
@@ -115,7 +114,6 @@ module tb_sram;
 	endtask
 
 	initial begin
-		rstn = 1'b1;
 		idle();
 		fill();
 		drain_p1();

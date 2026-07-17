@@ -10,4 +10,3 @@ set_load 0.03 [all_outputs]
 
 set_max_fanout 16 [current_design]
 set_max_transition 0.75 [current_design]
-

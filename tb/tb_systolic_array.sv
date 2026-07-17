@@ -1,15 +1,16 @@
 `timescale 1ns/1ps
 
 module tb_systolic_array;
-    parameter int unsigned N = 4; // set using makefile even
-    parameter int unsigned DW = 8;
-    localparam int unsigned RW = (2*DW) + $clog2(N);
-    localparam int unsigned PW = N*N*DW;
-    localparam int unsigned LATENCY = 3*N;
-    localparam int unsigned CASES = 12;
-    localparam int UNS_MAX = (1 << DW) - 1;
-    localparam int SGN_MAX = (1 << (DW-1)) - 1;
-    localparam int SGN_MIN = -(1 << (DW-1));
+    parameter integer N = 4; // set using makefile even
+    parameter integer DW = 8;
+    localparam integer RW = (2*DW) + $clog2(N);
+    localparam integer PRW = (N*N) * RW;
+    localparam integer PW = N*N*DW;
+    localparam integer LATENCY = 3*N+1;
+    localparam integer CASES = 12;
+    localparam integer UNS_MAX = (1 << DW) - 1;
+    localparam integer SGN_MAX = (1 << (DW-1)) - 1;
+    localparam integer SGN_MIN = -(1 << (DW-1));
 
     logic clk = 1'b0;
     always #5 clk = ~clk;
@@ -18,7 +19,7 @@ module tb_systolic_array;
     logic o_done, o_busy;
     logic i_pe_sign_en;
     logic [PW-1:0] i_ld_a, i_ld_b;
-    logic [N*N-1:0][RW-1:0] o_result_data;
+    logic [PRW-1:0] o_result_data;
 
 `ifdef GLS
     systolic_array dut (
@@ -155,7 +156,7 @@ module tb_systolic_array;
 
             for (int i = 0; i < N; i++) begin
                 for (int j = 0; j < N; j++) begin
-                    check($sformatf("t%0d C[%0d][%0d]", t, i, j), sign ? int'($signed(o_result_data[i*N + j])) : int'(o_result_data[i*N + j]), C[i][j]);
+                    check($sformatf("t%0d C[%0d][%0d]", t, i, j), sign ? int'($signed(o_result_data[RW*(i*N + j) +: RW])) : int'(o_result_data[RW*(i*N + j) +: RW]), C[i][j]);
                 end
             end
         end

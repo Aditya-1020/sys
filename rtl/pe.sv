@@ -6,7 +6,7 @@ module pe #(
 	parameter ACC_WIDTH = 16
 )(
 	input wire clk,
-	input wire rstn,
+	// input wire rstn,
 	input wire i_enable, // compute
 	input wire i_clear,// clear accumulator
 	input wire i_signed,
@@ -39,7 +39,7 @@ module pe #(
 	assign a_extend = {a_s_bit, i_a};
 	assign w_extend = {w_s_bit, w_r};
 
-	logic signed [2*DATA_WIDTH+1:0] mult_r;
+	logic signed [2*DATA_WIDTH:0] mult_r;
 	assign mult_r = a_extend * w_extend;
 
 	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;

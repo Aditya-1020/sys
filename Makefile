@@ -4,8 +4,13 @@ CONSTRAINTS_DIR = constraints
 BUILD_DIR = build
 VERILOG_SV2V = verilog_sv2v
 
+LIBLANE_CONFIG ?= config.yaml
+
 SV_RTL = $(wildcard $(RTL_DIR)/*.sv)
 SV_TB = $(wildcard $(TB_DIR)/*.sv)
+# plain verilog models (sram macro): no sv2v, and compiled without -sv since
+# the generated model relies on verilog-2001 use-before-declare
+V_MODELS = $(wildcard $(RTL_DIR)/*.v)
 V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 V_SIM_SRCS = $(V_RTL) $(SV_TB)
 
@@ -33,11 +38,6 @@ GLS_CELL_DIR = $(BUILD_DIR)/gls_cells
 GLS_CELLS = $(GLS_CELL_DIR)/primitives.v $(GLS_CELL_DIR)/sky130_fd_sc_hd.v
 GLS_SNAPSHOT = $(TOP)_gls_snap
 
-# ----------------------------------------------------------------------------
-# Liberty files
-# Synthesis gets a trimmed lib (lpflow_*/probe_* removed) so abc can't infer
-# power-gating cells. STA keeps the full lib; the netlist won't contain them.
-# ----------------------------------------------------------------------------
 PDK_ROOT ?= $(HOME)/eda/.volare
 LIB_DIR ?= $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/lib
 FULL_LIB := $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
@@ -68,10 +68,11 @@ $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
 sv2v_rtl: $(V_RTL)
 
 xcompile: $(V_RTL)
+	$(if $(V_MODELS),xvlog --relax $(SIM_DEFS) $(V_MODELS))
 	xvlog -sv $(SIM_DEFS) $(V_SIM_SRCS)
 
 xelab: xcompile
-	xelab -debug typical -top $(TOP) -snapshot $(SNAPSHOT) $(SIM_GENERICS)
+	xelab -debug typical -timescale 1ps/1ps -top $(TOP) -snapshot $(SNAPSHOT) $(SIM_GENERICS)
 
 xrun: xelab
 	xsim $(SNAPSHOT) -R
@@ -104,6 +105,13 @@ sta: $(V_RTL) $(TRIM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tc
 
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(SV_TB)
+
+liblane:
+	make sv2v_rtl
+	librelane $(LIBLANE_CONFIG)
+
+lib-last_run:
+	librelane --last-run --flow openinopenroad config.yaml
 
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) xsim.dir .Xil

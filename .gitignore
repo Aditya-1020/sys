@@ -31,3 +31,5 @@ __pycache__/
 docs/
 verilog_sv2v/
 AMBA4_AXI4_Protocol_Specificiation.pdf
+old/
+notes/
