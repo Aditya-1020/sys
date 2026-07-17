@@ -21,7 +21,7 @@ module sram #(
 	input wire [ADDR_WIDTH-1:0] i_p1_addr,
 	output wire [DATA_WIDTH-1:0] o_p1_rdata // valid 1 cycle after enab;e
 );
-	// sram prams mirror
+	// sram params mirror
 	localparam integer NUM_WMASKS = 4;
 	// verilator lint_off UNUSEDPARAM
 	localparam integer RAM_DEPTH = 1 << ADDR_WIDTH;	 // 512 words 
@@ -30,7 +30,7 @@ module sram #(
 	wire csb0, web0, csb1;
 	assign csb0 = ~i_p0_en; // low = selected
 	assign csb1 = ~i_p1_en;
-	assign web0 = ~i_p0_en; // low = wr
+	assign web0 = ~i_p0_we; // low = wr
 
 	wire [NUM_WMASKS-1:0] wmask0;
 	//assign wmask0 = i_p0_wrmask && {NUM_WMASKS{i_p0_we}};
