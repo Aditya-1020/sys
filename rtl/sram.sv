@@ -20,7 +20,7 @@ module sram #(
 	// sram params mirror
 	localparam integer NUM_WMASKS = 4;
 	// verilator lint_off UNUSEDPARAM
-	localparam integer RAM_DEPTH = 1 << ADDR_WIDTH;	 // 256
+	// localparam integer RAM_DEPTH = 1 << ADDR_WIDTH;	 // 256
 	// verilator lint_on UNUSEDPARAM
 	
 	wire csb0, web0, csb1;
