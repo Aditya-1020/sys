@@ -17,7 +17,8 @@ module systolic_array #(
 	input  wire i_pe_sign_en, // csr controlled
 	output wire [RESULT_PACKED_W-1:0] o_result_data,
 	output wire o_done,
-	output wire o_busy
+	output wire o_busy,
+	output wire o_result_valid
 );
 	localparam integer ARRAY_ROWS = MATRIX_SIZE;
 	localparam integer ARRAY_COLS = MATRIX_SIZE;
@@ -49,12 +50,26 @@ module systolic_array #(
 		end
 	end
 
+	// register compute last for valud
+	logic result_valid_r;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			result_valid_r <= 1'b0;
+		end else begin
+			result_valid_r <= compute_last;
+		end
+	end
+	assign o_result_valid = result_valid_r;
+
+	assign o_busy = (current_state != LOAD);
+	wire start_array = i_start && (current_state == LOAD);
+	
 	// next state logic
 	always_comb begin
 		next_state = current_state;
 		case (current_state)
 			LOAD: begin
-				if (i_start) begin
+				if (start_array) begin
 					next_state = CLEAR;
 				end
 			end
@@ -80,7 +95,7 @@ module systolic_array #(
 	logic done_r, done_st;
 	always_comb begin
 		done_st = done_r;
-		if ((current_state == LOAD) && i_start) begin
+		if (start_array) begin
 			done_st = 1'b0; // clear on new job
 		end else if (compute_last) begin
 			done_st = 1'b1; // latch
@@ -96,7 +111,6 @@ module systolic_array #(
 	end
 
 	assign o_done = done_r;
-	assign o_busy = (current_state != LOAD);
 
 	wire pe_clear = (current_state == CLEAR);
 	wire pe_enable = (current_state == COMPUTE);
@@ -110,20 +124,20 @@ module systolic_array #(
 
 	// col c control delayed by c
 	wire [MATRIX_SIZE-1:0] pe_en_col, pe_clr_col;
-	logic [MATRIX_SIZE-1:1] en_pipe_q, clr_pipe_q;
+	logic [MATRIX_SIZE-1:1] en_pipe_r, clr_pipe_r;
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
-			en_pipe_q <= '0;
-			clr_pipe_q <= '0;
+			en_pipe_r <= '0;
+			clr_pipe_r <= '0;
 		end else begin
-			en_pipe_q <= pe_en_col[MATRIX_SIZE-2:0];
-			clr_pipe_q <= pe_clr_col[MATRIX_SIZE-2:0];
+			en_pipe_r <= pe_en_col[MATRIX_SIZE-2:0];
+			clr_pipe_r <= pe_clr_col[MATRIX_SIZE-2:0];
 		end
 	end
 
-	assign pe_en_col = {en_pipe_q, pe_enable};
-	assign pe_clr_col = {clr_pipe_q, pe_clear};
+	assign pe_en_col = {en_pipe_r, pe_enable};
+	assign pe_clr_col = {clr_pipe_r, pe_clear};
 
 	genvar r, c;
 	generate
@@ -182,7 +196,16 @@ module systolic_array #(
 	endgenerate
 
 	logic [RESULT_WIDTH-1:0] result_r [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-	// c[m][j] is valid on the drain for one cycle (m+N+j); latched to presetn in parallel
+	// c[m][j] is valid on the drain for one cycle (m+N+j); latched to present in parallel
+
+	/*
+		result_r is only valud once o_result_valid_plses
+			- contents are stable till next COMPUTE overwrites
+			- downstream should capture it before compute phase
+			- overrite timing: start-> clear- > result_r stays till 5 compute cycles
+				- capture then (use result_valid for a signal to start capturing)
+	*/
+
 	always_ff @(posedge clk) begin
 		if (pe_enable) begin
 			for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
