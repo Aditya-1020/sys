@@ -15,7 +15,6 @@ module systolic_array #(
 	input  wire [INPUT_PACKED_W-1:0] i_ld_a,
 	input  wire [INPUT_PACKED_W-1:0] i_ld_b,
 	input  wire i_pe_sign_en, // csr controlled
-	// output wire [(MATRIX_SIZE*MATRIX_SIZE)-1:0][RESULT_WIDTH-1:0] o_result_data, /// --- CHANGGE THIS AND HANDLE IT FLAT BELOW
 	output wire [RESULT_PACKED_W-1:0] o_result_data,
 	output wire o_done,
 	output wire o_busy
@@ -26,7 +25,7 @@ module systolic_array #(
 
 	localparam integer FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
 	localparam integer PE_LATENCY = 1;
-	localparam integer FEED_LATENCY = 1; // --
+	localparam integer FEED_LATENCY = 1;
 	localparam integer TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY; 
 	localparam integer COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
     
