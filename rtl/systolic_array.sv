@@ -4,16 +4,19 @@
 module systolic_array #(
 	parameter integer MATRIX_SIZE = 4,
 	parameter integer DATA_WIDTH = 8,
-	parameter integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE),
-	parameter integer PACKED_W = MATRIX_SIZE * MATRIX_SIZE * DATA_WIDTH
+	parameter integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 19 sum the products without overflow
+	parameter integer TOTAL_ELEMENTS = MATRIX_SIZE * MATRIX_SIZE, // 16
+	parameter integer INPUT_PACKED_W =  TOTAL_ELEMENTS * DATA_WIDTH, // 16 * 8 = 128
+	parameter integer RESULT_PACKED_W = TOTAL_ELEMENTS * RESULT_WIDTH // 288
 )(
 	input wire clk,
 	input wire rstn,
 	input  wire i_start,
-	input  wire [PACKED_W-1:0] i_ld_a,
-	input  wire [PACKED_W-1:0] i_ld_b,
+	input  wire [INPUT_PACKED_W-1:0] i_ld_a,
+	input  wire [INPUT_PACKED_W-1:0] i_ld_b,
 	input  wire i_pe_sign_en, // csr controlled
-	output wire [(MATRIX_SIZE*MATRIX_SIZE)-1:0][RESULT_WIDTH-1:0] o_result_data,
+	// output wire [(MATRIX_SIZE*MATRIX_SIZE)-1:0][RESULT_WIDTH-1:0] o_result_data, /// --- CHANGGE THIS AND HANDLE IT FLAT BELOW
+	output wire [RESULT_PACKED_W-1:0] o_result_data,
 	output wire o_done,
 	output wire o_busy
 );
@@ -132,7 +135,7 @@ module systolic_array #(
 					.ACC_WIDTH (RESULT_WIDTH)
 				) u_pe (
 					.clk     (clk),
-					.rstn    (rstn),
+					// .rstn    (rstn),
 					.i_enable(pe_en_col[c]),
 					.i_clear (pe_clr_col[c]),
 					.i_signed(i_pe_sign_en),
@@ -196,7 +199,8 @@ module systolic_array #(
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_result_row
 			for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_result_col
-				assign o_result_data[r*ARRAY_COLS + c] = result_r[r][c];
+				// assign o_result_data[r*ARRAY_COLS + c] = result_r[r][c];
+				assign o_result_data[RESULT_WIDTH*(r*ARRAY_COLS + c) +: RESULT_WIDTH] = result_r[r][c];
 			end
 		end
 	endgenerate
