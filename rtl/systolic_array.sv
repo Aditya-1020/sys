@@ -4,7 +4,7 @@
 module systolic_array #(
 	parameter integer MATRIX_SIZE = 4,
 	parameter integer DATA_WIDTH = 8,
-	parameter integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 19 sum the products without overflow
+	parameter integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 18 sum the products without overflow
 	parameter integer TOTAL_ELEMENTS = MATRIX_SIZE * MATRIX_SIZE, // 16
 	parameter integer INPUT_PACKED_W =  TOTAL_ELEMENTS * DATA_WIDTH, // 16 * 8 = 128
 	parameter integer RESULT_PACKED_W = TOTAL_ELEMENTS * RESULT_WIDTH // 288

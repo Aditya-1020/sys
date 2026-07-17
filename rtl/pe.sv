@@ -3,10 +3,9 @@
 
 module pe #(
 	parameter DATA_WIDTH = 8,
-	parameter ACC_WIDTH = 16
+	parameter ACC_WIDTH = 19
 )(
 	input wire clk,
-	// input wire rstn,
 	input wire i_enable, // compute
 	input wire i_clear,// clear accumulator
 	input wire i_signed,
@@ -17,7 +16,7 @@ module pe #(
 	output wire [DATA_WIDTH-1:0] o_a,
 	output wire [ACC_WIDTH-1:0] o_psum
 );
-	logic [DATA_WIDTH-1:0] a_r;
+	logic [DATA_WIDTH-1:0] a_r; // pass through only
 	always_ff @(posedge clk) begin
 		if (i_enable) begin
 			a_r <= i_a;
@@ -39,12 +38,12 @@ module pe #(
 	assign a_extend = {a_s_bit, i_a};
 	assign w_extend = {w_s_bit, w_r};
 
-	logic signed [2*DATA_WIDTH:0] mult_r;
-	assign mult_r = a_extend * w_extend;
+	logic [2*DATA_WIDTH:0] mult_w;
+	assign mult_w = a_extend * w_extend;
 
 	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
 	always_comb begin
-		next_acc = signed'(i_psum) + ACC_WIDTH'(mult_r);
+		next_acc = signed'(i_psum) + ACC_WIDTH'(mult_w);
 	end
 
 	always_ff @(posedge clk) begin
