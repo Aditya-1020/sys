@@ -8,38 +8,29 @@ module pe #(
 	input wire clk,
 	input wire i_enable, // compute
 	input wire i_clear,// clear accumulator
-	input wire i_signed,
 	input wire i_w_load,
-	input wire [DATA_WIDTH-1:0] i_a,
-	input wire [DATA_WIDTH-1:0] i_b,
+	input wire signed [DATA_WIDTH-1:0] i_a,
+	input wire signed [DATA_WIDTH-1:0] i_b,
 	input wire [ACC_WIDTH-1:0] i_psum,
 	output wire [DATA_WIDTH-1:0] o_a,
 	output wire [ACC_WIDTH-1:0] o_psum
 );
-	logic [DATA_WIDTH-1:0] a_r; // pass through only
+	logic signed [DATA_WIDTH-1:0] a_r; // pass through only
 	always_ff @(posedge clk) begin
 		if (i_enable) begin
 			a_r <= i_a;
 		end
 	end
 
-	logic [DATA_WIDTH-1:0] w_r;
+	logic signed [DATA_WIDTH-1:0] w_r;
 	always_ff @(posedge clk) begin
 		if (i_w_load) begin
 			w_r <= i_b;
 		end
 	end
 
-	wire a_s_bit, w_s_bit;
-	assign a_s_bit = i_signed ? i_a[DATA_WIDTH-1] : 1'b0;
-	assign w_s_bit = i_signed ? w_r[DATA_WIDTH-1] : 1'b0;
-
-	logic signed [DATA_WIDTH:0] a_extend, w_extend;
-	assign a_extend = {a_s_bit, i_a};
-	assign w_extend = {w_s_bit, w_r};
-
 	logic signed [2*DATA_WIDTH:0] mult_w;
-	assign mult_w = a_extend * w_extend;
+	assign mult_w = i_a * w_r;
 
 	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
 	always_comb begin

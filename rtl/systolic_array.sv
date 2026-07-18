@@ -19,7 +19,6 @@ module systolic_array #(
 	input wire [LANE_W-1:0] i_b_lane,
 	input wire [ROW_W-1:0] i_b_wdata,
 	
-	input  wire i_pe_sign_en, // csr controlled
 	output wire [RESULT_PACKED_W-1:0] o_result_data,
 	output wire o_done,
 	output wire o_busy,
@@ -116,7 +115,6 @@ module systolic_array #(
 	end
 
 	assign o_done = done_r;
-
 	wire pe_clear = (current_state == CLEAR);
 	wire pe_enable = (current_state == COMPUTE);
 
@@ -163,7 +161,6 @@ module systolic_array #(
 					// .rstn    (rstn),
 					.i_enable(pe_en_col[c]),
 					.i_clear (pe_clr_col[c]),
-					.i_signed(i_pe_sign_en),
 					.i_w_load(pe_w_load[r]),
 					.i_a     (pe_a_in[r][c]),
 					.i_b     (pe_w_in[r][c]),
