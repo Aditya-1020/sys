@@ -23,7 +23,7 @@ module csr #(
 
 	// ctlr
 	output logic o_enable,
-	output logic o_sign_en,
+
 	// status
 	input wire i_busy,
 	input wire i_empty,
@@ -40,8 +40,7 @@ module csr #(
 	localparam logic [5:0] ADDR_IRQ= 6'd2;
 
 	localparam integer CTRL_EN = 0;
-	localparam integer CTRL_SIGN_EN = 1;
-	localparam integer CTRL_IRQ_EN = 2;
+	localparam integer CTRL_IRQ_EN = 1;
 
 	logic [5:0] word;
 	logic wr, rd, ctrl_wr;
@@ -54,7 +53,7 @@ module csr #(
 	assign b_wr = wr && (word[5:2] == 4'd1);
 	assign irq_clear = wr && (word == ADDR_IRQ) && i_wdata[0];
 
-	// ctrl[0] en, ctrl[1] sign, ctrl[2]] irq en
+	// ctrl[0] en, ctrl[1] irq en
 	logic [2:0] ctrl_r;
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
@@ -111,7 +110,6 @@ module csr #(
 	
 	assign o_rdata = rdata_r;
 	assign o_enable = ctrl_r[CTRL_EN];
-	assign o_sign_en = ctrl_r[CTRL_SIGN_EN];
 	assign o_irq = irq_r && ctrl_r[CTRL_IRQ_EN];
 	assign o_b_en = b_wr && !i_busy;
 	assign o_b_lane = word[1:0];
