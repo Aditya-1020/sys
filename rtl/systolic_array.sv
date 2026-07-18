@@ -7,13 +7,18 @@ module systolic_array #(
 	parameter integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 18 sum the products without overflow
 	parameter integer TOTAL_ELEMENTS = MATRIX_SIZE * MATRIX_SIZE, // 16
 	parameter integer INPUT_PACKED_W =  TOTAL_ELEMENTS * DATA_WIDTH, // 16 * 8 = 128
-	parameter integer RESULT_PACKED_W = TOTAL_ELEMENTS * RESULT_WIDTH // 288
+	parameter integer RESULT_PACKED_W = TOTAL_ELEMENTS * RESULT_WIDTH, // 288
+	parameter integer LANE_W = $clog2(MATRIX_SIZE),
+	parameter integer ROW_W = MATRIX_SIZE*DATA_WIDTH // 32
 )(
 	input wire clk,
 	input wire rstn,
 	input  wire i_start,
 	input  wire [INPUT_PACKED_W-1:0] i_ld_a,
-	input  wire [INPUT_PACKED_W-1:0] i_ld_b,
+	input wire i_b_en,
+	input wire [LANE_W-1:0] i_b_lane,
+	input wire [ROW_W-1:0] i_b_wdata,
+	
 	input  wire i_pe_sign_en, // csr controlled
 	output wire [RESULT_PACKED_W-1:0] o_result_data,
 	output wire o_done,
@@ -50,7 +55,7 @@ module systolic_array #(
 		end
 	end
 
-	// register compute last for valud
+	// register compute last for valid
 	logic result_valid_r;
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
@@ -114,7 +119,14 @@ module systolic_array #(
 
 	wire pe_clear = (current_state == CLEAR);
 	wire pe_enable = (current_state == COMPUTE);
-	wire pe_w_load = (current_state == CLEAR);
+
+	wire [ARRAY_ROWS-1:0] pe_w_load;
+	genvar w;
+	generate
+		for (w = 0; w < ARRAY_ROWS; w = w + 1) begin : gen_weight_load
+			assign pe_w_load[w] = i_b_en && (i_b_lane == w);
+		end
+	endgenerate
 
 	wire [DATA_WIDTH-1:0] pe_a_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire [DATA_WIDTH-1:0] pe_a_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
@@ -152,7 +164,7 @@ module systolic_array #(
 					.i_enable(pe_en_col[c]),
 					.i_clear (pe_clr_col[c]),
 					.i_signed(i_pe_sign_en),
-					.i_w_load(pe_w_load),
+					.i_w_load(pe_w_load[r]),
 					.i_a     (pe_a_in[r][c]),
 					.i_b     (pe_w_in[r][c]),
 					.i_psum  (pe_psum_in[r][c]),
@@ -161,7 +173,7 @@ module systolic_array #(
 				);
 
 				// stationary weight from b_r
-				assign pe_w_in[r][c] = i_ld_b[DATA_WIDTH*(ARRAY_COLS*r + c) +: DATA_WIDTH];
+				assign pe_w_in[r][c] = i_b_wdata[DATA_WIDTH*c +: DATA_WIDTH];
 
 				// a to right b to bottom
 				if (c < ARRAY_COLS-1) begin : gen_a_flow

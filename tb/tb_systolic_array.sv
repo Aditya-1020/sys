@@ -11,6 +11,8 @@ module tb_systolic_array;
     localparam integer UNS_MAX = (1 << DW) - 1;
     localparam integer SGN_MAX = (1 << (DW-1)) - 1;
     localparam integer SGN_MIN = -(1 << (DW-1));
+    localparam integer LANE_W = $clog2(N);
+    localparam integer ROW_W = N*DW;
 
     logic clk = 1'b0;
     always #5 clk = ~clk;
@@ -18,8 +20,11 @@ module tb_systolic_array;
     logic rstn, i_start;
     logic o_done, o_busy;
     logic i_pe_sign_en;
-    logic [PW-1:0] i_ld_a, i_ld_b;
+    logic [PW-1:0] i_ld_a;//, i_ld_b;
     logic [PRW-1:0] o_result_data;
+    logic i_b_en;
+	logic [LANE_W-1:0] i_b_lane;
+	logic [ROW_W-1:0] i_b_wdata;
 
 `ifdef GLS
     systolic_array dut (
@@ -32,7 +37,10 @@ module tb_systolic_array;
         .clk           (clk),
         .rstn          (rstn),
         .i_ld_a        (i_ld_a),
-        .i_ld_b        (i_ld_b),
+        // .i_ld_b        (i_ld_b),
+        .i_b_en(i_b_en),
+        .i_b_lane(i_b_lane),
+        .i_b_wdata(i_b_wdata),
         .i_pe_sign_en  (i_pe_sign_en),
         .i_start       (i_start),
         .o_result_data (o_result_data),
@@ -64,17 +72,27 @@ module tb_systolic_array;
             end
         end
     endtask
-
+    
     task automatic load;
         @(posedge clk);
         i_pe_sign_en <= sign;
 
-        for (int i = 0; i < N; i++) begin
-           for (int j = 0; j < N; j++) begin
+        // A: whole matrix on the flat bus, held stable through COMPUTE
+        for (int i = 0; i < N; i++)
+            for (int j = 0; j < N; j++)
                 i_ld_a[DW*(N*i + j) +: DW] <= A[i][j][DW-1:0];
-                i_ld_b[DW*(N*i + j) +: DW] <= B[i][j][DW-1:0];
-            end
+
+        // B: one row per cycle — lane selects the row, en strobes the write
+        i_b_en <= 1'b1;
+        for (int i = 0; i < N; i++) begin
+            i_b_lane <= i[1:0];                       // row index
+            for (int j = 0; j < N; j++)
+                i_b_wdata[DW*j +: DW] <= B[i][j][DW-1:0];
+            @(posedge clk);                           // array latches this row
         end
+        i_b_en <= 1'b0;
+
+        // kick off
         i_start <= 1'b1;
         @(posedge clk);
         i_start <= 1'b0;
@@ -83,7 +101,10 @@ module tb_systolic_array;
     task automatic reset_dut;
         rstn <= 1'b0;
         i_ld_a <= '0;
-        i_ld_b <= '0;
+        // i_ld_b <= '0;
+        i_b_en <= '0;
+        i_b_lane <= '0;
+        i_b_wdata <= '0;
         i_pe_sign_en <= 1'b0;
         i_start <= 1'b0;
         repeat (4) @(posedge clk);
