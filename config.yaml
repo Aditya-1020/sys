@@ -18,3 +18,10 @@ PL_TARGET_DENSITY_PCT: 55
 # PL_RESIZER_HOLD_SLACK_MARGIN: 0.1 # hold fix slow corners
 # antenna repair for long nets
 # DIODE_ON_PORTS: "in"
+
+# RUN_POST_CTS_RESIZER_TIMING = True
+# RUN_POST_GRT_RESIZER_TIMING = True
+# SYNTH_MUL_BOOTH = True # test this out
+# https://yosyshq.readthedocs.io/projects/yosys/en/0.40/cmd/booth.html
+# SYNTH_ADDER_TYPE: options: ‘YOSYS’｜ ’FA’｜ ’RCA｜’CSA’
+# SYNTH_ABC_DFF: elminate identical FFs

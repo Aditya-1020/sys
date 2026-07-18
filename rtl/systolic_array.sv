@@ -14,7 +14,8 @@ module systolic_array #(
 	input wire clk,
 	input wire rstn,
 	input  wire i_start,
-	input  wire [INPUT_PACKED_W-1:0] i_ld_a,
+	input  wire i_a_valid,
+	input  wire [ROW_W-1:0] i_ld_a, // one matrix a row per valid
 	input wire i_b_en,
 	input wire [LANE_W-1:0] i_b_lane,
 	input wire [ROW_W-1:0] i_b_wdata,
@@ -30,7 +31,7 @@ module systolic_array #(
 
 	localparam integer FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
 	localparam integer PE_LATENCY = 1;
-	localparam integer FEED_LATENCY = 1;
+	localparam integer FEED_LATENCY = 0; // a feeds combinationally; the pe registers it
 	localparam integer TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY; 
 	localparam integer COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
     
@@ -162,8 +163,8 @@ module systolic_array #(
 					.i_enable(pe_en_col[c]),
 					.i_clear (pe_clr_col[c]),
 					.i_w_load(pe_w_load[r]),
-					.i_a     (pe_a_in[r][c]),
-					.i_b     (pe_w_in[r][c]),
+					.i_a     (signed'(pe_a_in[r][c])),
+					.i_b     (signed'(pe_w_in[r][c])),
 					.i_psum  (pe_psum_in[r][c]),
 					.o_a     (pe_a_out[r][c]),
 					.o_psum  (pe_psum_out[r][c])
@@ -186,21 +187,23 @@ module systolic_array #(
 		end
 	endgenerate
 
-	// feeding wires
+	// a streams one row per valid during idle
+	// current job operaand stays put
+	logic [INPUT_PACKED_W-1:0] a_mat_r;
+	always_ff @(posedge clk) begin
+		if (i_a_valid && (current_state == LOAD)) begin
+			a_mat_r <= {i_ld_a, a_mat_r[INPUT_PACKED_W-1:ROW_W]};
+		end
+	end
+
+	// feeding wires: a drives the left edge combinationally; the pe's own input
+	// register gives the one-cycle skew, so no extra pipeline stage is needed here.
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed
 			wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
-			wire feed_window = (elm_a < COUNT_WIDTH'(INNER_DIM));
+			wire feed_window = pe_enable && (elm_a < COUNT_WIDTH'(INNER_DIM));
 			wire [COUNT_WIDTH-1:0] a_idx = feed_window ? elm_a : '0;
-			logic [DATA_WIDTH-1:0] pe_a_in_r;
-			always_ff @(posedge clk) begin
-				if (pe_enable && feed_window) begin
-					pe_a_in_r <= i_ld_a[DATA_WIDTH*(INNER_DIM*a_idx + r)+: DATA_WIDTH];
-				end else begin
-					pe_a_in_r <= '0;
-				end
-			end
-			assign pe_a_in[r][0] = pe_a_in_r;
+			assign pe_a_in[r][0] = feed_window ? a_mat_r[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
 		end
 	endgenerate
 

@@ -1,9 +1,14 @@
 `default_nettype none
 `timescale 1ps/1ps
 
+/*
+- weights and activations are symmetric int8
+- relu outputs are treated as signed non-negative
+*/
+
 module pe #(
 	parameter DATA_WIDTH = 8,
-	parameter ACC_WIDTH = 19
+	parameter ACC_WIDTH = 18
 )(
 	input wire clk,
 	input wire i_enable, // compute

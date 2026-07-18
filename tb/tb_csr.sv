@@ -37,7 +37,6 @@ module tb_csr;
 		.o_b_lane    (b_lane),
 		.o_b_wdata   (b_wdata),
 		.o_enable    (enable_out),
-		.o_sign_en   (sign_enable),
 		
 		.i_busy      (busy),
 		.i_empty     (empty),
@@ -50,7 +49,7 @@ module tb_csr;
 
 	property outputs_low_during_reset;
 		@(posedge dut.clk) (!dut.rstn)
-		|-> (dut.o_sign_en == 0 && dut.o_enable == 0);
+		|-> (dut.o_enable == 0);
 	endproperty
 	assert_outputs_low_during_reset : assert property (outputs_low_during_reset);
 
@@ -109,7 +108,7 @@ module tb_csr;
 
 	task automatic monitor_out;
 		$monitor("To Array: b_en:%0d  | o_blane=%0d | o_b_data=%0d", dut.o_b_en, dut.o_b_lane, dut.o_b_wdata);
-		$monitor("o_enable=%0d | o_sign_en=%0d | o_irq=%0d", dut.o_enable, dut.o_sign_en, dut.o_irq);
+		$monitor("o_enable=%0d  | o_irq=%0d", dut.o_enable, dut.o_irq);
 	endtask
 
 	initial begin
