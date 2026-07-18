@@ -38,7 +38,7 @@ module pe #(
 	assign a_extend = {a_s_bit, i_a};
 	assign w_extend = {w_s_bit, w_r};
 
-	logic [2*DATA_WIDTH:0] mult_w;
+	logic signed [2*DATA_WIDTH:0] mult_w;
 	assign mult_w = a_extend * w_extend;
 
 	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
