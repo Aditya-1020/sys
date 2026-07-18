@@ -188,7 +188,6 @@ module systolic_array #(
 	endgenerate
 
 	// a streams one row per valid during idle
-	// current job operaand stays put
 	logic [INPUT_PACKED_W-1:0] a_mat_r;
 	always_ff @(posedge clk) begin
 		if (i_a_valid && (current_state == LOAD)) begin
@@ -196,8 +195,7 @@ module systolic_array #(
 		end
 	end
 
-	// feeding wires: a drives the left edge combinationally; the pe's own input
-	// register gives the one-cycle skew, so no extra pipeline stage is needed here.
+	// feeding wires
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed
 			wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
