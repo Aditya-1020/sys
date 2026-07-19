@@ -7,7 +7,6 @@ module systolic_array #(
 	parameter integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 18 sum the products without overflow
 	parameter integer TOTAL_ELEMENTS = MATRIX_SIZE * MATRIX_SIZE, // 16
 	parameter integer INPUT_PACKED_W =  TOTAL_ELEMENTS * DATA_WIDTH, // 16 * 8 = 128
-	parameter integer RESULT_PACKED_W = TOTAL_ELEMENTS * RESULT_WIDTH, // 288
 	parameter integer LANE_W = $clog2(MATRIX_SIZE),
 	parameter integer ROW_W = MATRIX_SIZE*DATA_WIDTH // 32
 )(
@@ -19,11 +18,13 @@ module systolic_array #(
 	input wire i_b_en,
 	input wire [LANE_W-1:0] i_b_lane,
 	input wire [ROW_W-1:0] i_b_wdata,
-	
-	output wire [RESULT_PACKED_W-1:0] o_result_data,
+
+	// results stream single element per valid,ready
+	output wire [RESULT_WIDTH-1:0] o_result_data,
+	output wire o_result_valid,
+	input  wire i_result_ready,
 	output wire o_done,
-	output wire o_busy,
-	output wire o_result_valid
+	output wire o_busy
 );
 	localparam integer ARRAY_ROWS = MATRIX_SIZE;
 	localparam integer ARRAY_COLS = MATRIX_SIZE;
@@ -38,7 +39,8 @@ module systolic_array #(
 	typedef enum logic [1:0] {
 		LOAD,  // idle cum receive a and b
 		CLEAR,
-		COMPUTE
+		COMPUTE,
+		STREAM // drain result to the output
 	} state_t;
 	state_t current_state, next_state;
 
@@ -55,16 +57,21 @@ module systolic_array #(
 		end
 	end
 
-	// register compute last for valid
-	logic result_valid_r;
+	localparam integer IDX_W = $clog2(TOTAL_ELEMENTS);
+	logic [IDX_W-1:0] rd_idx;
+	wire streaming = (current_state == STREAM);
+	wire beat = streaming && i_result_ready;
+	wire stream_last = beat && (rd_idx == IDX_W'(TOTAL_ELEMENTS-1));
+
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
-			result_valid_r <= 1'b0;
-		end else begin
-			result_valid_r <= compute_last;
+			rd_idx <= '0;
+		end else if (current_state != STREAM) begin
+			rd_idx <= '0;
+		end else if (i_result_ready) begin
+			rd_idx <= rd_idx + 1'b1;
 		end
 	end
-	assign o_result_valid = result_valid_r;
 
 	assign o_busy = (current_state != LOAD);
 	wire start_array = i_start && (current_state == LOAD);
@@ -81,6 +88,11 @@ module systolic_array #(
 			CLEAR: next_state = COMPUTE;
 			COMPUTE: begin
 				if (compute_last) begin
+					next_state = STREAM;
+				end
+			end
+			STREAM: begin
+				if (stream_last) begin
 					next_state = LOAD;
 				end
 			end
@@ -102,8 +114,8 @@ module systolic_array #(
 		done_st = done_r;
 		if (start_array) begin
 			done_st = 1'b0; // clear on new job
-		end else if (compute_last) begin
-			done_st = 1'b1; // latch
+		end else if (stream_last) begin
+			done_st = 1'b1; // latch when the last result has been accepted
 		end
 	end
 
@@ -156,10 +168,10 @@ module systolic_array #(
 			for (c = 0; c < ARRAY_COLS; c = c+1 ) begin : gen_pe_column
 				pe #(
 					.DATA_WIDTH(DATA_WIDTH),
+					.MATRIX_SIZE(MATRIX_SIZE),
 					.ACC_WIDTH (RESULT_WIDTH)
 				) u_pe (
 					.clk     (clk),
-					// .rstn    (rstn),
 					.i_enable(pe_en_col[c]),
 					.i_clear (pe_clr_col[c]),
 					.i_w_load(pe_w_load[r]),
@@ -205,36 +217,21 @@ module systolic_array #(
 		end
 	endgenerate
 
-	logic [RESULT_WIDTH-1:0] result_r [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-	// c[m][j] is valid on the drain for one cycle (m+N+j); latched to present in parallel
-
-	/*
-		result_r is only valud once o_result_valid_plses
-			- contents are stable till next COMPUTE overwrites
-			- downstream should capture it before compute phase
-			- overrite timing: start-> clear- > result_r stays till 5 compute cycles
-				- capture then (use result_valid for a signal to start capturing)
-	*/
-
+	logic [RESULT_WIDTH-1:0] result_buf [0:TOTAL_ELEMENTS-1];
 	always_ff @(posedge clk) begin
 		if (pe_enable) begin
 			for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
 				for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
 					if (cycle_count_r == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY)) begin
-						result_r[m][j] <= pe_psum_out[ARRAY_ROWS-1][j];
+						result_buf[m*ARRAY_COLS + j] <= pe_psum_out[ARRAY_ROWS-1][j];
 					end
 				end
 			end
 		end
 	end
-    
-	generate
-		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_result_row
-			for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_result_col
-				assign o_result_data[RESULT_WIDTH*(r*ARRAY_COLS + c) +: RESULT_WIDTH] = result_r[r][c];
-			end
-		end
-	endgenerate
+
+	assign o_result_valid = streaming;
+	assign o_result_data  = result_buf[rd_idx];
 
 endmodule
 `default_nettype wire

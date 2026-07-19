@@ -7,8 +7,9 @@
 */
 
 module pe #(
-	parameter DATA_WIDTH = 8,
-	parameter ACC_WIDTH = 18
+	parameter integer DATA_WIDTH = 8,
+	parameter integer MATRIX_SIZE = 4,
+	parameter integer ACC_WIDTH = 2*DATA_WIDTH + $clog2(MATRIX_SIZE)
 )(
 	input wire clk,
 	input wire i_enable, // compute
