@@ -8,8 +8,6 @@ LIBLANE_CONFIG ?= config.yaml
 
 SV_RTL = $(wildcard $(RTL_DIR)/*.sv)
 SV_TB = $(wildcard $(TB_DIR)/*.sv)
-# plain verilog models (sram macro): no sv2v, and compiled without -sv since
-# the generated model relies on verilog-2001 use-before-declare
 V_MODELS = $(wildcard $(RTL_DIR)/*.v)
 V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 V_SIM_SRCS = $(V_RTL) $(SV_TB)
@@ -22,8 +20,6 @@ SNAPSHOT = $(TOP)_snap
 
 N ?= 4
 DW ?= 8
-# per top, xelab errors on a generic the top does not declare.
-# tb_matmul_accel gets none, its sizes are fixed inside matmul_accel
 SIM_GENERICS_tb_systolic_array = -generic_top "N=$(N)" -generic_top "DW=$(DW)"
 SIM_GENERICS = $(SIM_GENERICS_$(TOP))
 ifeq ($(DUMP),1)
@@ -104,7 +100,7 @@ sta: $(V_RTL) $(TRIM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tc
 	sta   scripts/$(STA_TOP)/sta.tcl
 
 lint:
-	verilator --lint-only -Wall --timing $(SV_RTL) $(SV_TB)
+	verilator --lint-only -Wall --timing lint.vlt $(SV_RTL) $(SV_TB) $(addprefix -v ,$(V_MODELS))
 
 liblane:
 	make sv2v_rtl
