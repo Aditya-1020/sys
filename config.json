@@ -1,0 +1,26 @@
+{
+	"DESIGN_NAME": "top",
+	"VERILOG_FILES": "dir::verilog_sv2v/*.v",
+	"CLOCK_PORT": "clk",
+	"CLOCK_PERIOD": 5,
+	"PNR_SDC_FILE": "dir::constraints/top.sdc",
+	"SIGNOFF_SDC_FILE": "dir::constraints/top.sdc",
+	"FP_SIZING": "absolute",
+	"DIE_AREA": [0, 0, 740, 740],
+	"MAGIC_DRC_USE_GDS": true,
+
+	"MACROS": {
+		"sky130_sram_1kbyte_1rw1r_32x256_8": {
+			"instances": {
+				"u_accel.u_in_fifo.sram": {}
+			},
+			"gds": ["pdk_dir::libs.ref/sky130_sram_macros/gds/sky130_sram_1kbyte_1rw1r_32x256_8.gds"],
+			"lef": ["pdk_dir::libs.ref/sky130_sram_macros/lef/sky130_sram_1kbyte_1rw1r_32x256_8.lef"],
+			"nl": ["dir::rtl/sky130_sram_1kbyte_1rw1r_32x256_8.v"],
+			"lib": {
+				"*": ["pdk_dir::libs.ref/sky130_sram_macros/lib/sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C.lib"]
+			}
+		}
+	},
+	"PDN_MACRO_CONNECTIONS": [".*sram VPWR VGND vccd1 vssd1"]
+}

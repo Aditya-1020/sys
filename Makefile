@@ -4,7 +4,7 @@ CONSTRAINTS_DIR = constraints
 BUILD_DIR = build
 VERILOG_SV2V = verilog_sv2v
 
-LIBLANE_CONFIG ?= config.yaml
+LIBLANE_CONFIG ?= config.json
 
 SV_RTL = $(wildcard $(RTL_DIR)/*.sv)
 SV_TB = $(wildcard $(TB_DIR)/*.sv)
@@ -41,26 +41,33 @@ TRIM_LIB := $(BUILD_DIR)/sky130_fd_sc_hd__tt_025C_1v80.trimmed.lib
 
 TT_SYNTH_LIB := $(TRIM_LIB)
 TT_STA_LIB := $(FULL_LIB)
+
+STA_SRAM_LIB := sram/sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C.lib
+
 export TT_STA_LIB
 export TT_SYNTH_LIB
+export STA_SRAM_LIB
 
 # STA: scripts in scripts/<module>/{synth,sta}.tcl, sdc in constraints/<module>.sdc
 STA_TOP ?= pe
 
-.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl
+.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl sweep liblane
 
 all: xrun
 
 $(VERILOG_SV2V) $(BUILD_DIR):
-	mkdir -p $@
+	@mkdir -p $@
 
 $(TRIM_LIB): $(FULL_LIB) scripts/filter_lib.py | $(BUILD_DIR)
 	python3 scripts/filter_lib.py $< $@
 
 $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
-	echo '`timescale 1ps/1ps' > $@
-	sv2v $< >> $@
+	@echo '`timescale 1ps/1ps' > $@
+	@sv2v $< >> $@
 
+# SRAM behavioral model is NOT copied into $(VERILOG_SV2V): it must stay out of
+# the VERILOG_FILES glob so Yosys treats the macro as a blackbox (model comes
+# from MACROS.nl -> rtl/sky130_sram_1kbyte_1rw1r_32x256_8.v).
 sv2v_rtl: $(V_RTL)
 
 xcompile: $(V_RTL)
@@ -95,19 +102,36 @@ wave:
 	gtkwave dump.vcd &
 
 # make sta STA_TOP=module_name (change lib in TT_STA_LIB if needed)
-sta: $(V_RTL) $(TRIM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tcl $(CONSTRAINTS_DIR)/$(STA_TOP).sdc | $(BUILD_DIR)
+sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tcl $(CONSTRAINTS_DIR)/$(STA_TOP).sdc | $(BUILD_DIR)
 	yosys -c scripts/$(STA_TOP)/synth.tcl
 	sta   scripts/$(STA_TOP)/sta.tcl
 
 lint:
 	verilator --lint-only -Wall --timing lint.vlt $(SV_RTL) $(SV_TB) $(addprefix -v ,$(V_MODELS))
 
-liblane:
-	make sv2v_rtl
-	librelane $(LIBLANE_CONFIG)
+# liblane: run the LibreLane flow to GDS + render.
+#   make liblane                        -> timestamped run dir runs/RUN_<ts>/
+#   make liblane RUN=<tag>              -> named run dir   runs/<tag>/   (used by sweep.tcl)
+#   make liblane LIBLANE_CONFIG=<file>  -> alternate config (default config.json)
+RUN ?=
+LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
+LL_RENDER := $(if $(RUN),--run-tag $(RUN),--last-run)
+LL_RUNDIR := $(if $(RUN),runs/$(RUN),runs/RUN_*)
+
+liblane: $(V_RTL)
+	librelane $(LL_RUN) --to KLayout.StreamOut $(LIBLANE_CONFIG)
+	klayout -b -r scripts/strip_orphan_tops.py \
+		-rd gds=$$(ls -dt $(LL_RUNDIR)/*-magic-streamout/top.gds | head -1) -rd top=top
+	librelane $(LL_RENDER) --from KLayout.Render $(LIBLANE_CONFIG)
+
+# sweep: deterministic floorplan sizing -> per-candidate `make liblane RUN=sweep_NN`
+# -> compare table, all printed live to the terminal. Edit run_list / pick /
+# targets in scripts/sweep.tcl to choose how many candidates run.
+sweep: $(V_RTL)
+	@tclsh scripts/sweep.tcl
 
 lib-last_run:
-	librelane --last-run --flow openinopenroad config.yaml
+	librelane --last-run --flow openinopenroad $(LIBLANE_CONFIG)
 
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) xsim.dir .Xil

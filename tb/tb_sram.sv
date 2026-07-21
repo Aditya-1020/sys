@@ -7,7 +7,6 @@ module tb_sram;
 
 	logic clk;
     logic p0_en, p0_we, p1_en;
-    logic [3:0] p0_wrmask;
     logic [ADDR_WIDTH-1:0] p0_addr, p1_addr;
     logic [DATA_WIDTH-1:0] p0_wdata, p0_rdata, p1_rdata;
 
@@ -20,7 +19,6 @@ module tb_sram;
         .clk        (clk),
         .i_p0_en    (p0_en),
         .i_p0_we    (p0_we),
-        .i_p0_wrmask(p0_wrmask),
         .i_p0_addr  (p0_addr),
         .i_p0_wdata (p0_wdata),
         .o_p0_rdata (p0_rdata),
@@ -39,7 +37,6 @@ module tb_sram;
 	task automatic idle;
 		p0_en = 1'b0;
 		p0_we= 1'b0;
-		p0_wrmask = 4'h0;
 		p0_addr = '0;
 		p0_wdata = '0;
 		p1_en = 1'b0;
@@ -50,13 +47,11 @@ module tb_sram;
 		@(posedge clk);
 		p0_en <= 1'b1;
 		p0_we <= 1'b1;
-		p0_wrmask <= 4'hF;
 		p0_addr <= a;
 		p0_wdata  <= d;
 		@(posedge clk);
 		p0_en <= 1'b0;
 		p0_we <= 1'b0;
-		p0_wrmask <= 4'h0;
 	endtask
 
 	task automatic read_p0(input [ADDR_WIDTH-1:0] a, output [DATA_WIDTH-1:0] d);

@@ -1,6 +1,9 @@
 yosys -import
 set libfile $::env(TT_SYNTH_LIB)
+set sram_lib $::env(STA_SRAM_LIB)
 
+# sram macro comes in as a liberty blackbox, not the behavioral model
+read_liberty -lib $sram_lib
 read_verilog verilog_sv2v/*.v
 synth -top top -flatten
 opt -full

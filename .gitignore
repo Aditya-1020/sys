@@ -1,6 +1,7 @@
 # generated
 build/
-runs/
+config.sweep_*.json
+
 obj_dir/
 
 # xsim
@@ -31,3 +32,5 @@ __pycache__/
 docs/
 verilog_sv2v/
 notes/
+picorv32/
+ROUGH

@@ -80,7 +80,10 @@ module tb_in_fifo;
 		end else begin
 			expv = exp_q.pop_front();
 		end
-		check_eq(o_matrix_data, expv, "matrix data");
+		if (o_matrix_data !== expv) begin
+			errors = errors + 1;
+			$error("matrix data: got %h, expected %h @%0t", o_matrix_data, expv, $time);
+		end
 		// held matrix must stay stable for the whole job
 		repeat (job_cycles) begin
 			@(negedge clk);
@@ -113,35 +116,35 @@ module tb_in_fifo;
 		i_matrix_ready = 1'b0; // no consumer yet, let the fifo fill
 		stream_n(0, 10);
 		@(negedge clk);
-		check_eq(o_level, 10, "level after 10");
-		check_eq(o_full, 1'b0, "full after 10");
-		check_eq(o_wr_ready, 1'b1, "wr_ready after 10");
+		check_eq(64'(o_level), 10, "level after 10");
+		check_eq(64'(o_full), 0, "full after 10");
+		check_eq(64'(o_wr_ready), 1, "wr_ready after 10");
 
 		// write the 11th: while its words stream in, 10 are still in flight
 		put_word(word_data(10, 0));
 		put_word(word_data(10, 1));
 		put_word(word_data(10, 2));
 		@(negedge clk);
-		check_eq(o_level, 10, "level mid-write 11th (10 in flight)");
-		check_eq(o_wr_ready, 1'b1, "wr_ready mid-write 11th");
-		check_eq(o_full, 1'b0, "full mid-write 11th");
+		check_eq(64'(o_level), 10, "level mid-write 11th (10 in flight)");
+		check_eq(64'(o_wr_ready), 1, "wr_ready mid-write 11th");
+		check_eq(64'(o_full), 0, "full mid-write 11th");
 
 		put_word(word_data(10, 3)); // 4th word -> push
 		i_wr_valid <= 1'b0;
 		exp_q.push_back(exp_matrix(10));
 		@(negedge clk);
-		check_eq(o_level, 11, "level after 11 (full)");
-		check_eq(o_full, 1'b1, "full after 11");
-		check_eq(o_wr_ready, 1'b0, "wr_ready gated when full");
+		check_eq(64'(o_level), 11, "level after 11 (full)");
+		check_eq(64'(o_full), 1, "full after 11");
+		check_eq(64'(o_wr_ready), 0, "wr_ready gated when full");
 	endtask
 
 	task automatic phase_b;
 		$display("[B] drain 11, check data/order/hold-stability");
 		for (int m = 0; m < 11; m++) consume_matrix(5);
 		@(negedge clk);
-		check_eq(o_empty, 1'b1, "empty after drain");
-		check_eq(o_level, 0, "level 0 after drain");
-		check_eq(o_matrix_valid, 1'b0, "valid low after drain");
+		check_eq(64'(o_empty), 1, "empty after drain");
+		check_eq(64'(o_level), 0, "level 0 after drain");
+		check_eq(64'(o_matrix_valid), 0, "valid low after drain");
 	endtask
 
 	task automatic phase_c;
@@ -154,8 +157,8 @@ module tb_in_fifo;
 			end
 		join
 		@(negedge clk);
-		check_eq(exp_q.size(), 0, "scoreboard drained");
-		check_eq(o_empty, 1'b1, "empty after phase C");
+		check_eq(64'(exp_q.size()), 0, "scoreboard drained");
+		check_eq(64'(o_empty), 1, "empty after phase C");
 	endtask
 
 	initial begin
@@ -164,9 +167,9 @@ module tb_in_fifo;
 		$dumpvars(0, tb_in_fifo);
 `endif
 		do_reset();
-		check_eq(o_empty, 1'b1, "empty at reset");
-		check_eq(o_full, 1'b0, "full at reset");
-		check_eq(o_level, 0, "level at reset");
+		check_eq(64'(o_empty), 1, "empty at reset");
+		check_eq(64'(o_full), 0, "full at reset");
+		check_eq(64'(o_level), 0, "level at reset");
 
 		phase_a();
 		phase_b();
