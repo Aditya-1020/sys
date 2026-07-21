@@ -36,7 +36,7 @@ module pe #(
 	end
 
 	logic signed [2*DATA_WIDTH:0] mult_w;
-	assign mult_w = i_a * w_r;
+	assign mult_w = a_r * w_r;
 
 	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
 	always_comb begin
