@@ -30,7 +30,6 @@ module in_fifo #(
 	localparam integer SLOT_W = $clog2(NUM_SLOTS); // 4
 	localparam integer LEVEL_W = $clog2(NUM_SLOTS + 1); // 4
 	localparam integer FCNT_W = $clog2(WORDS + 1); // 3, counts 0 -WORDS
-	localparam integer SRAM_DW = DATA_W; // 32
 	localparam integer SRAM_AW = 8;
 	localparam integer PAD_W = SRAM_AW - SLOT_W - WORD_W;
 	localparam logic [WORD_W-1:0] WORD_LAST = WORD_W'(WORDS - 1); // 3

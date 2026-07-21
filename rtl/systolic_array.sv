@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 
 module systolic_array #(
@@ -264,4 +264,4 @@ module systolic_array #(
 	assign o_result_data  = c_data_r;
 
 endmodule
-`default_nettype wire
+`default_nettype none

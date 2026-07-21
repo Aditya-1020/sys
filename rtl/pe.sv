@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 
 /*
@@ -55,4 +55,4 @@ module pe #(
 	assign o_a = a_r;
 
 endmodule
-`default_nettype wire
+`default_nettype none

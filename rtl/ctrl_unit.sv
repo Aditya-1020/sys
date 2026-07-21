@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 
 module ctrl_unit #(
@@ -219,4 +219,4 @@ module ctrl_unit #(
 	assign o_irq = irq_r && ctrl_r[CTRL_IRQ_EN];
 
 endmodule
-`default_nettype wire
+`default_nettype none

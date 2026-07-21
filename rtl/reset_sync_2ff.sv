@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 module reset_sync_2ff (
     input wire i_clk,
@@ -18,4 +18,4 @@ module reset_sync_2ff (
     assign rstn_sync = sync_reg[1];
 
 endmodule
-`default_nettype wire
+`default_nettype none

@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 
 module spi_if #(
@@ -187,4 +187,4 @@ module spi_if #(
 	/* verilator lint_on UNUSEDSIGNAL */
 
 endmodule
-`default_nettype wire
+`default_nettype none

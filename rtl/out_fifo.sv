@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 
 module out_fifo #(
@@ -77,4 +77,4 @@ module out_fifo #(
 	assign o_level = {{(8-LEVEL_W){1'b0}}, level_r};
 
 endmodule
-`default_nettype wire
+`default_nettype none
