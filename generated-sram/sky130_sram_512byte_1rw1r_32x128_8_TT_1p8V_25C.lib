@@ -1,4 +1,4 @@
-library (sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C_lib){
+library (sky130_sram_512byte_1rw1r_32x128_8_TT_1p8V_25C_lib){
     delay_model : "table_lookup";
     time_unit : "1ns" ;
     voltage_unit : "1V" ;
@@ -6,7 +6,7 @@ library (sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C_lib){
     resistance_unit : "1kohm" ;
     capacitive_load_unit(1, pF) ;
     leakage_power_unit : "1mW" ;
-    pulling_resistance_unit :"1kohm" ;
+    pulling_resistance_unit : "1kohm" ;
     operating_conditions(OC){
     process : 1.0 ;
     voltage : 1.8 ;
@@ -66,8 +66,8 @@ library (sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C_lib){
     type (addr){
     base_type : array;
     data_type : bit;
-    bit_width : 8;
-    bit_from : 7;
+    bit_width : 7;
+    bit_from : 6;
     bit_to : 0;
     }
 
@@ -79,17 +79,17 @@ library (sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C_lib){
     bit_to : 0;
     }
 
-cell (sky130_sram_1kbyte_1rw1r_32x256_8){
+cell (sky130_sram_512byte_1rw1r_32x128_8){
     memory(){ 
     type : ram;
-    address_width : 8;
+    address_width : 7;
     word_width : 32;
     }
     interface_timing : true;
     dont_use  : true;
     map_only   : true;
     dont_touch : true;
-    area : 190712.55;
+    area : 131366.3544;
 
     pg_pin(vccd1) {
          voltage_name : VCCD1;
@@ -102,9 +102,9 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
     }
 
     leakage_power () {
-      value : 0.009516;
+      value : 0.00488;
     }
-    cell_leakage_power : 0.009516;
+    cell_leakage_power : 0.00488;
     bus(din0){
         bus_type  : data; 
         direction  : input; 
@@ -158,14 +158,14 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
             related_pin : "clk0"; 
             timing_type : falling_edge; 
             cell_rise(CELL_TABLE) {
-            values("0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484");
+            values("0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441");
             }
             cell_fall(CELL_TABLE) {
-            values("0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484");
+            values("0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441");
             }
             rise_transition(CELL_TABLE) {
             values("0.002, 0.005, 0.016",\
@@ -186,7 +186,7 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
         direction  : input; 
         capacitance : 0.006889999999999999;  
         max_transition       : 0.04;
-        pin(addr0[7:0]){
+        pin(addr0[6:0]){
         timing(){ 
             timing_type : setup_rising; 
             related_pin  : "clk0"; 
@@ -328,57 +328,57 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
         internal_power(){
             when : "!csb0 & !web0"; 
             rise_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
             fall_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
         }
         internal_power(){
             when : "csb0 & !web0"; 
             rise_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
             fall_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
         }
         internal_power(){
             when : "!csb0 & web0"; 
             rise_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
             fall_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
         }
         internal_power(){
             when : "csb0 & web0"; 
             rise_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
             fall_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
         }
         timing(){ 
-            timing_type :"min_pulse_width"; 
+            timing_type : "min_pulse_width"; 
             related_pin  : clk0; 
             rise_constraint(scalar) {
-                values("0.8955"); 
+                values("0.815"); 
             }
             fall_constraint(scalar) {
-                values("0.8955"); 
+                values("0.815"); 
             }
          }
         timing(){ 
-            timing_type :"minimum_period"; 
+            timing_type : "minimum_period"; 
             related_pin  : clk0; 
             rise_constraint(scalar) {
-                values("1.791"); 
+                values("1.63"); 
             }
             fall_constraint(scalar) {
-                values("1.791"); 
+                values("1.63"); 
             }
          }
     }
@@ -397,14 +397,14 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
             related_pin : "clk1"; 
             timing_type : falling_edge; 
             cell_rise(CELL_TABLE) {
-            values("0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484");
+            values("0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441");
             }
             cell_fall(CELL_TABLE) {
-            values("0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484",\
-                   "0.339, 0.368, 0.484");
+            values("0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441",\
+                   "0.295, 0.324, 0.441");
             }
             rise_transition(CELL_TABLE) {
             values("0.002, 0.005, 0.016",\
@@ -425,7 +425,7 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
         direction  : input; 
         capacitance : 0.006889999999999999;  
         max_transition       : 0.04;
-        pin(addr1[7:0]){
+        pin(addr1[6:0]){
         timing(){ 
             timing_type : setup_rising; 
             related_pin  : "clk1"; 
@@ -497,39 +497,39 @@ cell (sky130_sram_1kbyte_1rw1r_32x256_8){
         internal_power(){
             when : "!csb1"; 
             rise_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
             fall_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
         }
         internal_power(){
             when : "csb1"; 
             rise_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
             fall_power(scalar){
-                values("9.589466e+00");
+                values("2.617047e+10");
             }
         }
         timing(){ 
-            timing_type :"min_pulse_width"; 
+            timing_type : "min_pulse_width"; 
             related_pin  : clk1; 
             rise_constraint(scalar) {
-                values("0.8955"); 
+                values("0.815"); 
             }
             fall_constraint(scalar) {
-                values("0.8955"); 
+                values("0.815"); 
             }
          }
         timing(){ 
-            timing_type :"minimum_period"; 
+            timing_type : "minimum_period"; 
             related_pin  : clk1; 
             rise_constraint(scalar) {
-                values("1.791"); 
+                values("1.63"); 
             }
             fall_constraint(scalar) {
-                values("1.791"); 
+                values("1.63"); 
             }
          }
     }
