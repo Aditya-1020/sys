@@ -5,7 +5,7 @@ module tb_matmul_accel;
 	localparam integer DW = 32;
 	localparam integer N = 4;
 	localparam integer EW = 8;
-	localparam integer NUM_SLOTS = 64; // in_fifo capacity in matrices
+	localparam integer NUM_SLOTS = 16; // in_fifo capacity in matrices
 	localparam integer RES_DEPTH = 4;  // out_fifo depth
 	localparam integer BATCH = 3;
 	localparam int SGN_MIN = -(1 << (EW-1));

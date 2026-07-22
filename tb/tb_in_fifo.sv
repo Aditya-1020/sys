@@ -1,7 +1,7 @@
 `timescale 1ps/1ps
 
 module tb_in_fifo;
-	localparam integer NUM_SLOTS = 11;
+	localparam integer NUM_SLOTS = 16;
 	localparam integer MAT_W = 128;
 	localparam integer DATA_W = 32;
 	localparam integer WORDS = MAT_W / DATA_W; // 4

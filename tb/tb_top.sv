@@ -22,7 +22,7 @@ module tb_top;
 
     localparam int ST_BUSY = 0, ST_AEMPTY = 1, ST_AFULL = 2, ST_DONE = 3, ST_RESV = 4;
 
-    localparam int NMAT = 64;         // in_fifo capacity in matrices, 64 x 4 = all 256 sram words
+    localparam int NMAT = 16;         // in_fifo capacity in matrices, 16 x 4 = all 64 sram words
     localparam int PRIME = 4;         // matrices queued before the sustained interleave starts
     localparam int IDLE_GAP_MAX = 16; // allowed ctrl handshake + sram refetch gap, in clk cycles
 
@@ -203,7 +203,7 @@ module tb_top;
         frame_end();
     endtask
 
-    bit [255:0] sram_wr_seen, sram_rd_seen;
+    bit [63:0] sram_wr_seen, sram_rd_seen;
     always @(posedge clk) begin
         if (dut.u_accel.u_in_fifo.accept)
             sram_wr_seen[dut.u_accel.u_in_fifo.wr_addr] <= 1'b1;
@@ -243,7 +243,7 @@ module tb_top;
         repeat (8) @(posedge clk);
 
         spi_reg_read(CMD_STATUS_RD, v);
-        check("fill level 64", int'(v[15:8]), NMAT);
+        check("fill level 16", int'(v[15:8]), NMAT);
         check("fill full", int'(v[ST_AFULL]), 1);
         check("fill not empty", int'(v[ST_AEMPTY]), 0);
         check("fill wr_ready deasserted", int'(dut.u_accel.a_ready_w), 0);
@@ -253,7 +253,7 @@ module tb_top;
         frame_end();
         repeat (8) @(posedge clk);
         spi_reg_read(CMD_STATUS_RD, v);
-        check("fill level still 64", int'(v[15:8]), NMAT);
+        check("fill level still 16", int'(v[15:8]), NMAT);
         check("fill still full", int'(v[ST_AFULL]), 1);
         spi_reg_read(CMD_IRQ_RD, v);
         check("fill ovfl flagged", int'(v[1]), 1);
@@ -276,9 +276,9 @@ module tb_top;
         check("fill a empty after drain", int'(v[ST_AEMPTY]), 1);
         check("fill level 0 after drain", int'(v[15:8]), 0);
         check("fill results drained", int'(v[ST_RESV]), 0);
-        check("fill all 256 sram words written", int'(&sram_wr_seen), 1);
-        check("fill all 256 sram words read", int'(&sram_rd_seen), 1);
-        $display("  sram words written %0d/256, read %0d/256",
+        check("fill all 64 sram words written", int'(&sram_wr_seen), 1);
+        check("fill all 64 sram words read", int'(&sram_rd_seen), 1);
+        $display("  sram words written %0d/64, read %0d/64",
                  $countones(sram_wr_seen), $countones(sram_rd_seen));
     endtask
 
