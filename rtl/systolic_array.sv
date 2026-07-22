@@ -44,26 +44,20 @@ module systolic_array #(
 	} state_t;
 	state_t current_state, next_state;
 
-	// current state never decoded combinationally (was killing my timing)
-	logic [MATRIX_SIZE-1:0] en_col_r, clear_col_r;
+	(* keep *) logic [ARRAY_ROWS-1:0] en_head_r, clear_head_r;
 	
-	logic state_load_r; // a_mat_r; drives busy/start
+	(* keep *) logic state_load_r;                 // control copy: o_busy, start_array
+	(* keep *) logic [MATRIX_SIZE-1:0] a_ld_sel_r; // a_mat_r enables, one per ROW_W slice
 	logic stream_r;
 
-	// compute phase counter. next value is computed explicitly so every
-	// consumer (feed selects, capture strobes, compute_last) can compare
-	// against cycle_count_next and register the result a cycle early.
+	// compute phase counter
 	logic [COUNT_WIDTH-1:0] cycle_count_r;
-	wire [COUNT_WIDTH-1:0] cycle_count_next =
-		(current_state == COMPUTE) ? (cycle_count_r + 1'b1) : '0;
+	wire [COUNT_WIDTH-1:0] cycle_count_next = (current_state == COMPUTE) ? (cycle_count_r + 1'b1) : '0;
 	always_ff @(posedge clk) begin
 		cycle_count_r <= cycle_count_next;
 	end
 
-	// retimed: registered in the decode block below; cycle-exact with the
-	// old (current_state == COMPUTE) && (cycle_count_r == TOTAL-1)
 	logic compute_last_r;
-
 	localparam integer IDX_W = $clog2(TOTAL_ELEMENTS);
 	logic [IDX_W-1:0] rd_idx;
 	wire beat = stream_r && i_result_ready;
@@ -117,23 +111,22 @@ module systolic_array #(
 	wire stream_next = (next_state == STREAM);
 	wire state_load_next = (next_state == LOAD);
 
-	wire [MATRIX_SIZE-1:0] en_col_next = {en_col_r[MATRIX_SIZE-2:0], en_head_next};
-	wire [MATRIX_SIZE-1:0] clear_col_next = {clear_col_r[MATRIX_SIZE-2:0], clear_head_next};
-
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
-			en_col_r <= '0;
-			clear_col_r <= '0;
+			en_head_r <= '0;
+			clear_head_r <= '0;
 			compute_last_r <= 1'b0;
 			stream_r <= 1'b0;
 			state_load_r <= 1'b1; // reset state is LOAD
+			a_ld_sel_r <= '1;
 		end else begin
-			en_col_r <= en_col_next;
-			clear_col_r <= clear_col_next;
+			en_head_r <= {ARRAY_ROWS{en_head_next}};
+			clear_head_r <= {ARRAY_ROWS{clear_head_next}};
 			compute_last_r <= en_head_next
 				&& (cycle_count_next == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
 			stream_r <= stream_next;
 			state_load_r <= state_load_next;
+			a_ld_sel_r <= {MATRIX_SIZE{state_load_next}};
 		end
 	end
 	
@@ -171,26 +164,42 @@ module systolic_array #(
 	wire [DATA_WIDTH-1:0] pe_w_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire [RESULT_WIDTH-1:0] pe_psum_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire [RESULT_WIDTH-1:0] pe_psum_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire pe_en_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire pe_en_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire pe_clr_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire pe_clr_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 
 	genvar r, c;
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_pe_row
-			for (c = 0; c < ARRAY_COLS; c = c+1 ) begin : gen_pe_column
+			for (c = 0; c < ARRAY_COLS; c = c+1 ) begin : gen_pe_col
 				pe #(
 					.DATA_WIDTH(DATA_WIDTH),
 					.MATRIX_SIZE(MATRIX_SIZE),
 					.ACC_WIDTH (RESULT_WIDTH)
 				) u_pe (
 					.clk     (clk),
-					.i_enable(en_col_r[c]),
-					.i_clear (clear_col_r[c]),
+					.rstn    (rstn),
+					.i_enable(pe_en_in[r][c]),
+					.i_clear (pe_clr_in[r][c]),
 					.i_w_load(pe_w_load[r]),
 					.i_a     (pe_a_in[r][c]),
 					.i_b     (pe_w_in[r][c]),
 					.i_psum  (pe_psum_in[r][c]),
 					.o_a     (pe_a_out[r][c]),
-					.o_psum  (pe_psum_out[r][c])
+					.o_psum  (pe_psum_out[r][c]),
+					.o_enable(pe_en_out[r][c]),
+					.o_clear (pe_clr_out[r][c])
 				);
+
+				// enable/clear ride the wavefront left to right
+				if (c == 0) begin : gen_ctrl_head
+					assign pe_en_in[r][0]  = en_head_r[r];
+					assign pe_clr_in[r][0] = clear_head_r[r];
+				end else begin : gen_ctrl_flow
+					assign pe_en_in[r][c]  = pe_en_out[r][c-1];
+					assign pe_clr_in[r][c] = pe_clr_out[r][c-1];
+				end
 
 				// stationary weight from b_r
 				assign pe_w_in[r][c] = i_b_wdata[DATA_WIDTH*c +: DATA_WIDTH];
@@ -209,13 +218,25 @@ module systolic_array #(
 		end
 	endgenerate
 
-	// a streams one row per valid during idle
 	logic [INPUT_PACKED_W-1:0] a_mat_r;
-	always_ff @(posedge clk) begin
-		if (i_a_valid && state_load_r) begin
-			a_mat_r <= {i_ld_a, a_mat_r[INPUT_PACKED_W-1:ROW_W]};
+	genvar s;
+	generate
+		for (s = 0; s < MATRIX_SIZE; s = s + 1) begin : gen_a_load
+			if (s == MATRIX_SIZE-1) begin : gen_a_load_head
+				always_ff @(posedge clk) begin
+					if (i_a_valid && a_ld_sel_r[s]) begin
+						a_mat_r[ROW_W*s +: ROW_W] <= i_ld_a;
+					end
+				end
+			end else begin : gen_a_load_shift
+				always_ff @(posedge clk) begin
+					if (i_a_valid && a_ld_sel_r[s]) begin
+						a_mat_r[ROW_W*s +: ROW_W] <= a_mat_r[ROW_W*(s+1) +: ROW_W];
+					end
+				end
+			end
 		end
-	end
+	endgenerate
 
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed

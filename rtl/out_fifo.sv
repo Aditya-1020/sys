@@ -3,7 +3,7 @@
 
 module out_fifo #(
 	parameter integer DATA_W = 18,
-	parameter integer DEPTH = 4 // fixed
+	parameter integer DEPTH = 4
 )(
 	input wire clk,
 	input wire rstn,
@@ -23,49 +23,47 @@ module out_fifo #(
 	output logic o_empty,
 	output logic o_full
 );
-	localparam integer PTR_W = $clog2(DEPTH);
 	localparam integer LEVEL_W = $clog2(DEPTH + 1);
 
-	// pointers carry an extra wrap bit; DEPTH must be a power of 2
-	logic [PTR_W:0] wr_ptr_r, rd_ptr_r;
+	logic [LEVEL_W-1:0] level_r;
 	logic full, empty, push, pop;
 
-	// occupancy from pointer difference; wrap bits make full/empty exact
-	wire [LEVEL_W-1:0] level = wr_ptr_r - rd_ptr_r;
-	assign empty = (wr_ptr_r == rd_ptr_r);
-	assign full = (wr_ptr_r == {~rd_ptr_r[PTR_W], rd_ptr_r[PTR_W-1:0]});
+	assign empty = (level_r == '0);
+	assign full = (level_r == LEVEL_W'(DEPTH));
 	assign push = i_wr_valid && !full;
 	assign pop = i_rd_ready && !empty;
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
-			wr_ptr_r <= '0;
-		end else if (push) begin
-			wr_ptr_r <= wr_ptr_r + 1'b1; // natural wrap, MSB toggles
-		end
-	end
-
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			rd_ptr_r <= '0;
-		end else if (pop) begin
-			rd_ptr_r <= rd_ptr_r + 1'b1; // natural wrap, MSB toggles
+			level_r <= '0;
+		end else if (push && !pop) begin
+			level_r <= level_r + 1'b1;
+		end else if (pop && !push) begin
+			level_r <= level_r - 1'b1;
 		end
 	end
 
 	logic [DATA_W-1:0] mem_r [0:DEPTH-1];
 	always_ff @(posedge clk) begin
-		if (push) begin
-			mem_r[wr_ptr_r[PTR_W-1:0]] <= i_wr_data;
+		for (int unsigned i = 0; i < DEPTH; i++) begin
+			if (pop) begin
+				if (push && (level_r == LEVEL_W'(i + 1))) begin
+					mem_r[i] <= i_wr_data;
+				end else if (i < DEPTH-1) begin
+					mem_r[i] <= mem_r[i+1];
+				end
+			end else if (push && (level_r == LEVEL_W'(i))) begin
+				mem_r[i] <= i_wr_data;
+			end
 		end
 	end
 
 	assign o_wr_ready = !full;
 	assign o_rd_valid = !empty;
-	assign o_rd_data = mem_r[rd_ptr_r[PTR_W-1:0]];
+	assign o_rd_data = mem_r[0];
 	assign o_empty = empty;
 	assign o_full = full;
-	assign o_level = {{(8-LEVEL_W){1'b0}}, level};
+	assign o_level = {{(8-LEVEL_W){1'b0}}, level_r};
 
 endmodule
 `default_nettype none

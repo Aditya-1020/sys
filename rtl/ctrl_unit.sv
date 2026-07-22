@@ -14,7 +14,7 @@ module ctrl_unit #(
 	// csr channel from spi_if, single cycle strobes
 	input wire i_csr_wr,
 	input wire i_csr_rd,
-	input wire [1:0] i_csr_sel,
+	input wire [2:0] i_csr_sel, // one-hot from spi_if
 	input wire [CSR_DATA_W-1:0] i_csr_wdata,
 	output logic [CSR_DATA_W-1:0] o_csr_rdata,
 	output logic o_csr_rvalid,
@@ -49,9 +49,9 @@ module ctrl_unit #(
 );
 	localparam integer ROW_CNT_W = $clog2(MATRIX_SIZE);
 
-	localparam logic [1:0] SEL_CTRL = 2'd0;
-	localparam logic [1:0] SEL_STATUS = 2'd1;
-	localparam logic [1:0] SEL_IRQ = 2'd2;
+	localparam integer SEL_CTRL = 0;
+	localparam integer SEL_STATUS = 1;
+	localparam integer SEL_IRQ = 2;
 
 	localparam integer CTRL_EN = 0;
 	localparam integer CTRL_IRQ_EN = 1;
@@ -114,16 +114,32 @@ module ctrl_unit #(
 
 	wire busy = (current_state != IDLE) || i_array_busy;
 
-	assign o_a_valid = (current_state == LOAD);
-	assign o_a_row = i_matrix_data[ROW_W*row_cnt_r +: ROW_W];
+	logic [ROW_W-1:0] a_row_r;
+	logic a_valid_r;
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			a_valid_r <= 1'b0;
+		end else begin
+			a_valid_r <= (current_state == LOAD);
+		end
+	end
+
+	always_ff @(posedge clk) begin
+		a_row_r <= i_matrix_data[ROW_W*row_cnt_r +: ROW_W];
+	end
+	
+	assign o_a_valid = a_valid_r;
+	assign o_a_row = a_row_r;
+
 	assign o_start = (current_state == START);
 	assign o_matrix_ready = (current_state == START);
 	assign o_b_en = i_b_valid && !busy;
 
 	wire csr_wr = i_csr_wr;
 	wire csr_rd = i_csr_rd;
-	wire ctrl_wr = csr_wr && (i_csr_sel == SEL_CTRL);
-	wire irq_wr = csr_wr && (i_csr_sel == SEL_IRQ);
+	wire ctrl_wr = csr_wr && i_csr_sel[SEL_CTRL];
+	wire irq_wr = csr_wr && i_csr_sel[SEL_IRQ];
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
@@ -189,16 +205,9 @@ module ctrl_unit #(
 
 	logic [CSR_DATA_W-1:0] rdata_r, next_rdata;
 	always_comb begin
-		next_rdata = '0;
-		if (i_csr_sel == SEL_CTRL) begin
-			next_rdata = {30'h0, ctrl_r};
-		end else if (i_csr_sel == SEL_STATUS) begin
-			next_rdata = status_w;
-		end else if (i_csr_sel == SEL_IRQ) begin
-			next_rdata = {30'h0, a_ovfl_r, irq_r};
-		end else begin
-			next_rdata = '0;
-		end
+		next_rdata = ({CSR_DATA_W{i_csr_sel[SEL_CTRL]}} & {30'h0, ctrl_r})
+			| ({CSR_DATA_W{i_csr_sel[SEL_STATUS]}} & status_w)
+			| ({CSR_DATA_W{i_csr_sel[SEL_IRQ]}} & {30'h0, a_ovfl_r, irq_r});
 	end
 
 	logic rvalid_r;

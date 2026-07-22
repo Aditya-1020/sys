@@ -1,4 +1,4 @@
-`default_nettype none
+`default_nettype wire
 `timescale 1ps/1ps
 
 module in_fifo #(
@@ -78,7 +78,17 @@ module in_fifo #(
 	assign full = (wr_slot_r == {~rd_slot_r[SLOT_W], rd_slot_r[SLOT_W-1:0]});
 
 	assign read_issue = (current_state == RD_FETCH) && (fcnt_r <= FCNT_LAST_ISS);
-	assign cap_en = (current_state == RD_FETCH) && (fcnt_r != '0); // sram read latency = 1
+	// assign cap_en = (current_state == RD_FETCH) && (fcnt_r != '0); // sram read latency = 1
+
+	(* keep *) logic [WORD_W-1:0] cap_en_r;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			cap_en_r <= '0;
+		end else begin
+			cap_en_r <= {WORDS{read_issue}};
+		end
+	end
+
 	assign fetch_done = (current_state == RD_FETCH) && (fcnt_r == FCNT_DONE);
 	assign matrix_valid = (current_state == RD_VALID);
 	assign pop = matrix_valid && i_matrix_ready;
@@ -134,11 +144,16 @@ module in_fifo #(
 	logic [MAT_W-1:0] hold_r;
 	wire [DATA_W-1:0] rd_data;
 
-	always_ff @(posedge clk) begin
-		if (cap_en) begin
-			hold_r <= {rd_data, hold_r[MAT_W-1:DATA_W]};
+	genvar s;
+	generate
+		for (s = 0; s< WORDS; s = s+1) begin : gen_hold
+			always_ff @(posedge clk) begin
+				if (cap_en_r[s]) begin
+					hold_r[DATA_W*s +: DATA_W] <= (s == WORDS-1) ? rd_data : hold_r[DATA_W*(s+1) +: DATA_W];
+				end
+			end
 		end
-	end
+	endgenerate
 
 	wire [SRAM_AW-1:0] wr_addr = {wr_slot_r[SLOT_W-1:0], wr_word_r};
 	wire [SRAM_AW-1:0] rd_addr = {rd_slot_r[SLOT_W-1:0], rd_word};
@@ -177,4 +192,4 @@ module in_fifo #(
 	assign o_level = {{(8-LEVEL_W){1'b0}}, level};
 
 endmodule
-`default_nettype wire
+`default_nettype none

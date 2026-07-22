@@ -16,7 +16,7 @@ module spi_if #(
 	// csr channel, control/status only
 	output logic o_csr_wr,
 	output logic o_csr_rd,
-	output logic [1:0] o_csr_sel,
+	output logic [2:0] o_csr_sel, // one hto
 	output logic [CSR_DATA_W-1:0] o_csr_wdata,
 	input wire [CSR_DATA_W-1:0] i_csr_rdata,
 	input wire i_csr_rvalid,
@@ -30,11 +30,14 @@ module spi_if #(
 	output logic [1:0] o_b_lane,
 	output logic [CSR_DATA_W-1:0] o_b_data,
 
-	// c result channel <- out_fifo, 32b sign extended by the accel
 	output logic o_c_pop,
 	input wire [CSR_DATA_W-1:0] i_c_data,
 	input wire i_c_valid
 );
+	localparam integer SEL_CTRL = 0;
+	localparam integer SEL_STATUS = 1;
+	localparam integer SEL_IRQ = 2;
+
 	typedef enum logic [1:0] {
 		PH_CMD  = 2'd0, // 8 command bits
 		PH_TURN = 2'd1, // 8 dead bits on reads, covers the fetch round trip
@@ -127,31 +130,39 @@ module spi_if #(
 	wire txw_ev = txw_sync_r[2] ^ txw_sync_r[1];
 
 	logic cmd_ev_q;
-	logic [7:0] cmd_q;
 	logic [2:0] wcnt_r;
+	(* keep *) logic is_csr_wr_r, is_csr_rd_r, is_a_wr_r, is_b_wr_r, is_c_rd_r;
+	(* keep *) logic [2:0] csr_sel_r;
+
 	always_ff @(posedge clk or negedge rstn_clk) begin
 		if (!rstn_clk) begin
 			cmd_ev_q <= 1'b0;
-			cmd_q <= '0;
 			wcnt_r <= '0;
+			is_csr_wr_r <= 1'b0;
+			is_csr_rd_r <= 1'b0;
+			is_a_wr_r <= 1'b0;
+			is_b_wr_r <= 1'b0;
+			is_c_rd_r <= 1'b0;
+			csr_sel_r <= '0;
 		end else begin
 			cmd_ev_q <= cmd_ev;
 			if (cs_sync_r[1]) begin
 				wcnt_r <= '0;
 			end else if (cmd_ev) begin
-				cmd_q <= cmd_r;
+				is_csr_wr_r <= (cmd_r[7:4] == 4'h8);
+				is_csr_rd_r <= (cmd_r[7:4] == 4'h0);
+				is_a_wr_r <= (cmd_r == 8'hA0);
+				is_b_wr_r <= (cmd_r == 8'hB0);
+				is_c_rd_r <= (cmd_r == 8'h40);
+				csr_sel_r[SEL_CTRL] <= (cmd_r[1:0] == 2'd0);
+				csr_sel_r[SEL_STATUS] <= (cmd_r[1:0] == 2'd1);
+				csr_sel_r[SEL_IRQ] <= (cmd_r[1:0] == 2'd2);
 				wcnt_r <= '0;
 			end else if (rx_ev && (wcnt_r != 3'd7)) begin
 				wcnt_r <= wcnt_r + 1'b1;
 			end
 		end
 	end
-
-	wire is_csr_wr = (cmd_q[7:4] == 4'h8);
-	wire is_csr_rd = (cmd_q[7:4] == 4'h0);
-	wire is_a_wr = (cmd_q == 8'hA0);
-	wire is_b_wr = (cmd_q == 8'hB0);
-	wire is_c_rd = (cmd_q == 8'h40);
 
 	// stage rdata
 	logic pop_q;
@@ -161,31 +172,28 @@ module spi_if #(
 			pop_q <= 1'b0;
 		end else begin
 			pop_q <= o_c_pop;
-			if (i_csr_rvalid && is_csr_rd) begin
+			if (i_csr_rvalid && is_csr_rd_r) begin
 				tx_word_r <= i_csr_rdata;
-			end else if ((cmd_ev_q && is_c_rd) || pop_q) begin
+			end else if ((cmd_ev_q && is_c_rd_r) || pop_q) begin
 				tx_word_r <= i_c_valid ? i_c_data : '0;
 			end
 		end
 	end
 
-	assign o_csr_wr = rx_ev && is_csr_wr && (wcnt_r == 3'd0);
-	assign o_csr_rd = cmd_ev_q && is_csr_rd;
-	assign o_csr_sel = cmd_q[1:0];
+	assign o_csr_wr = rx_ev && is_csr_wr_r && (wcnt_r == 3'd0);
+	assign o_csr_rd = cmd_ev_q && is_csr_rd_r;
+	assign o_csr_sel = csr_sel_r;
 	assign o_csr_wdata = rx_word_r;
 
-	assign o_a_valid = rx_ev && is_a_wr;
+	assign o_a_valid = rx_ev && is_a_wr_r;
 	assign o_a_data = rx_word_r;
 
-	assign o_b_valid = rx_ev && is_b_wr && (wcnt_r < 3'd4);
+	assign o_b_valid = rx_ev && is_b_wr_r && (wcnt_r < 3'd4);
 	assign o_b_lane = wcnt_r[1:0];
 	assign o_b_data = rx_word_r;
 
-	assign o_c_pop = txw_ev && is_c_rd;
+	assign o_c_pop = txw_ev && is_c_rd_r;
 
-	/* verilator lint_off UNUSEDSIGNAL */
-	wire _unused = &{1'b0, cmd_q[3:2]};
-	/* verilator lint_on UNUSEDSIGNAL */
 
 endmodule
 `default_nettype none
