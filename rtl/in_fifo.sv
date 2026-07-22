@@ -2,7 +2,7 @@
 `timescale 1ps/1ps
 
 module in_fifo #(
-	parameter integer NUM_SLOTS = 64, // sized buffer to mmeory available (spi is killing the input)
+	parameter integer NUM_SLOTS = 16, // sized buffer to mmeory available (spi is killing the input)
 	parameter integer MAT_W = 128,
 	parameter integer DATA_W = 32
 )(
@@ -27,10 +27,10 @@ module in_fifo #(
 );
 	localparam integer WORDS = MAT_W / DATA_W; // 4 words per matrix
 	localparam integer WORD_W = $clog2(WORDS); // 2
-	localparam integer SLOT_W = $clog2(NUM_SLOTS); // 6
-	localparam integer LEVEL_W = $clog2(NUM_SLOTS + 1); // 7
+	localparam integer SLOT_W = $clog2(NUM_SLOTS); // 4
+	localparam integer LEVEL_W = $clog2(NUM_SLOTS + 1); // 5
 	localparam integer FCNT_W = $clog2(WORDS + 1); // 3, counts 0 -WORDS
-	localparam integer SRAM_AW = 8;
+	localparam integer SRAM_AW = SLOT_W + WORD_W; // 6, must match the 32x64 macro addr width
 	localparam logic [WORD_W-1:0] WORD_LAST = WORD_W'(WORDS - 1); // 3
 	localparam logic [SLOT_W-1:0] SLOT_LAST = SLOT_W'(NUM_SLOTS - 1);
 	localparam logic [FCNT_W-1:0] FCNT_DONE = FCNT_W'(WORDS); // 4
@@ -161,7 +161,7 @@ module in_fifo #(
 	assign web0 = ~p0_we; // low = wr
 	assign csb1 = ~read_issue;
 
-	sky130_sram_1kbyte_1rw1r_32x256_8 sram (
+	sky130_sram_256byte_1rw1r_32x64_8 sram (
 		`ifdef USE_POWER_PINS
 		.vccd1(VCCD1),
 		.vssd1(VSSD1),

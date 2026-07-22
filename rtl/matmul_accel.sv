@@ -91,7 +91,7 @@ module matmul_accel #(
 	);
 
 	in_fifo #(
-		.NUM_SLOTS(64),
+		.NUM_SLOTS(16), // 16 slots x 4 words = 64-word 32x64 sram
 		.MAT_W    (MAT_W),
 		.DATA_W   (CSR_DATA_W)
 	) u_in_fifo (
