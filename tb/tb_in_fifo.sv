@@ -114,33 +114,33 @@ module tb_in_fifo;
 	task automatic phase_a;
 		$display("[A] depth / backpressure");
 		i_matrix_ready = 1'b0; // no consumer yet, let the fifo fill
-		stream_n(0, 10);
+		stream_n(0, NUM_SLOTS-1);
 		@(negedge clk);
-		check_eq(64'(o_level), 10, "level after 10");
-		check_eq(64'(o_full), 0, "full after 10");
-		check_eq(64'(o_wr_ready), 1, "wr_ready after 10");
+		check_eq(64'(o_level), NUM_SLOTS-1, "level one short of full");
+		check_eq(64'(o_full), 0, "full one short of full");
+		check_eq(64'(o_wr_ready), 1, "wr_ready one short of full");
 
-		// write the 11th: while its words stream in, 10 are still in flight
-		put_word(word_data(10, 0));
-		put_word(word_data(10, 1));
-		put_word(word_data(10, 2));
+		// write the last slot: while its words stream in, NUM_SLOTS-1 are still in flight
+		put_word(word_data(NUM_SLOTS-1, 0));
+		put_word(word_data(NUM_SLOTS-1, 1));
+		put_word(word_data(NUM_SLOTS-1, 2));
 		@(negedge clk);
-		check_eq(64'(o_level), 10, "level mid-write 11th (10 in flight)");
-		check_eq(64'(o_wr_ready), 1, "wr_ready mid-write 11th");
-		check_eq(64'(o_full), 0, "full mid-write 11th");
+		check_eq(64'(o_level), NUM_SLOTS-1, "level mid-write last slot");
+		check_eq(64'(o_wr_ready), 1, "wr_ready mid-write last slot");
+		check_eq(64'(o_full), 0, "full mid-write last slot");
 
-		put_word(word_data(10, 3)); // 4th word -> push
+		put_word(word_data(NUM_SLOTS-1, 3)); // 4th word -> push
 		i_wr_valid <= 1'b0;
-		exp_q.push_back(exp_matrix(10));
+		exp_q.push_back(exp_matrix(NUM_SLOTS-1));
 		@(negedge clk);
-		check_eq(64'(o_level), 11, "level after 11 (full)");
-		check_eq(64'(o_full), 1, "full after 11");
+		check_eq(64'(o_level), NUM_SLOTS, "level at full");
+		check_eq(64'(o_full), 1, "full at full");
 		check_eq(64'(o_wr_ready), 0, "wr_ready gated when full");
 	endtask
 
 	task automatic phase_b;
-		$display("[B] drain 11, check data/order/hold-stability");
-		for (int m = 0; m < 11; m++) consume_matrix(5);
+		$display("[B] drain all, check data/order/hold-stability");
+		for (int m = 0; m < NUM_SLOTS; m++) consume_matrix(5);
 		@(negedge clk);
 		check_eq(64'(o_empty), 1, "empty after drain");
 		check_eq(64'(o_level), 0, "level 0 after drain");

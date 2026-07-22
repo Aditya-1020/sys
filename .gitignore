@@ -33,3 +33,4 @@ docs/
 verilog_sv2v/
 notes/
 runs/
+macrofp.py
