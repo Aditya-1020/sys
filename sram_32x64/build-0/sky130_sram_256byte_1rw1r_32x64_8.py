@@ -10,12 +10,12 @@ num_spare_cols = 0
 num_spare_rows = 0
 
 tech_name = "sky130"
-process_corners = ["FF", "TT", "SS"]
-supply_voltages = [1.95, 1.80, 1.60]
-temperatures = [-40, 25, 100]
+process_corners = ["TT"]
+supply_voltages = [1.8]
+temperatures = [25]
 
 output_path = "build"
 output_name = "sky130_sram_256byte_1rw1r_32x64_8"
 
-analytical_delay = False
+analytical_delay = True
 check_lvsdrc = False
