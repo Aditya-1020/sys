@@ -32,5 +32,5 @@ __pycache__/
 docs/
 verilog_sv2v/
 notes/
-runs/
+wruns/
 macrofp.py
