@@ -56,13 +56,31 @@ module matmul_accel #(
 	wire [7:0] res_level_w;
 	wire res_empty_w, res_full_w;
 
+	(* keep *) logic rstn_ctrl_r;
+	(* keep *) logic rstn_ififo_r;
+	(* keep *) logic rstn_array_r;
+	(* keep *) logic rstn_ofifo_r;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			rstn_ctrl_r  <= 1'b0;
+			rstn_ififo_r <= 1'b0;
+			rstn_array_r <= 1'b0;
+			rstn_ofifo_r <= 1'b0;
+		end else begin
+			rstn_ctrl_r  <= 1'b1;
+			rstn_ififo_r <= 1'b1;
+			rstn_array_r <= 1'b1;
+			rstn_ofifo_r <= 1'b1;
+		end
+	end
+
 	ctrl_unit #(
 		.MATRIX_SIZE(MATRIX_SIZE),
 		.DATA_WIDTH (DATA_WIDTH),
 		.CSR_DATA_W (CSR_DATA_W)
 	) u_ctrl (
 		.clk              (clk),
-		.rstn             (rstn),
+		.rstn             (rstn_ctrl_r),
 		.i_csr_wr         (i_csr_wr),
 		.i_csr_rd         (i_csr_rd),
 		.i_csr_sel        (i_csr_sel),
@@ -100,7 +118,7 @@ module matmul_accel #(
 		.VSSD1(VSSD1),
 		`endif
 		.clk           (clk),
-		.rstn          (rstn),
+		.rstn          (rstn_ififo_r),
 		.i_wr_valid    (i_a_valid),
 		.i_wr_data     (i_a_data),
 		.o_wr_ready    (a_ready_w),
@@ -117,7 +135,7 @@ module matmul_accel #(
 		.DATA_WIDTH (DATA_WIDTH)
 	) u_array (
 		.clk           (clk),
-		.rstn          (rstn),
+		.rstn          (rstn_array_r),
 		.i_start       (ctrl_start_w),
 		.i_a_valid     (ctrl_a_valid_w),
 		.i_ld_a        (ctrl_a_row_w),
@@ -136,7 +154,7 @@ module matmul_accel #(
 		.DEPTH (RESULT_DEPTH)
 	) u_out_fifo (
 		.clk       (clk),
-		.rstn      (rstn),
+		.rstn      (rstn_ofifo_r),
 		.i_wr_valid(res_wr_valid_w),
 		.i_wr_data (res_wr_data_w),
 		.o_wr_ready(res_wr_ready_w),

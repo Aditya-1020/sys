@@ -6,6 +6,7 @@ module spi_if #(
 )(
 	input wire clk,
 	input wire rstn,
+	input wire rstn_clk,
 
 	input wire spi_sclk,
 	input wire spi_cs_n,
@@ -107,8 +108,8 @@ module spi_if #(
 
 	logic [2:0] cmd_sync_r, rx_sync_r, txw_sync_r;
 	logic [1:0] cs_sync_r;
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
+	always_ff @(posedge clk or negedge rstn_clk) begin
+		if (!rstn_clk) begin
 			cmd_sync_r <= '0;
 			rx_sync_r <= '0;
 			txw_sync_r <= '0;
@@ -128,8 +129,8 @@ module spi_if #(
 	logic cmd_ev_q;
 	logic [7:0] cmd_q;
 	logic [2:0] wcnt_r;
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
+	always_ff @(posedge clk or negedge rstn_clk) begin
+		if (!rstn_clk) begin
 			cmd_ev_q <= 1'b0;
 			cmd_q <= '0;
 			wcnt_r <= '0;
@@ -154,8 +155,8 @@ module spi_if #(
 
 	// stage rdata
 	logic pop_q;
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
+	always_ff @(posedge clk or negedge rstn_clk) begin
+		if (!rstn_clk) begin
 			tx_word_r <= '0;
 			pop_q <= 1'b0;
 		end else begin

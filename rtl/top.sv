@@ -40,7 +40,8 @@ module top #(
         .CSR_DATA_W(CSR_DATA_W)
     ) u_spi (
         .clk         (clk),
-        .rstn        (rstn_sync_w),
+        .rstn        (rstn),
+        .rstn_clk    (rstn_sync_w),
         .spi_sclk    (spi_sclk),
         .spi_cs_n    (spi_cs_n),
         .spi_mosi    (spi_mosi),

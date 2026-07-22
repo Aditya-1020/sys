@@ -32,21 +32,20 @@ module in_fifo #(
 	localparam integer FCNT_W = $clog2(WORDS + 1); // 3, counts 0 -WORDS
 	localparam integer SRAM_AW = SLOT_W + WORD_W; // 6, must match the 32x64 macro addr width
 	localparam logic [WORD_W-1:0] WORD_LAST = WORD_W'(WORDS - 1); // 3
-	localparam logic [SLOT_W-1:0] SLOT_LAST = SLOT_W'(NUM_SLOTS - 1);
 	localparam logic [FCNT_W-1:0] FCNT_DONE = FCNT_W'(WORDS); // 4
 	localparam logic [FCNT_W-1:0] FCNT_LAST_ISS = FCNT_W'(WORDS-1); // 3
 
 	logic full, empty, wr_ready, matrix_valid;
-	logic accept, last_word, push, pop;
+	logic accept, last_word, pop;
 	logic read_issue, cap_en, fetch_done;
 
+	// slot pointers carry an extra wrap bit; NUM_SLOTS must be a power of 2
 	logic [WORD_W-1:0] wr_word_r;
-	logic [SLOT_W-1:0] wr_slot_r;
+	logic [SLOT_W:0] wr_slot_r;
 
 	assign wr_ready = !full; // backpressure; never on busy
 	assign accept = i_wr_valid && wr_ready;
-	assign last_word = (wr_word_r == WORD_LAST);
-	assign push = accept && last_word; // word 4 revcied
+	assign last_word = (wr_word_r == WORD_LAST); // slot commits when word 4 recieved
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
@@ -55,24 +54,10 @@ module in_fifo #(
 		end else if (accept) begin
 			wr_word_r <= wr_word_r + 1'b1; // 3 to 0 wrap
 			if (last_word) begin
-				wr_slot_r <= (wr_slot_r == SLOT_LAST) ? '0 : wr_slot_r + 1'b1;
+				wr_slot_r <= wr_slot_r + 1'b1; // natural wrap, MSB toggles
 			end
 		end
 	end
-
-	logic [LEVEL_W-1:0] level_r; // check occupancy
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			level_r <= '0;
-		end else if (push && !pop) begin
-			level_r <= level_r + 1'b1;
-		end else if (pop && !push) begin
-			level_r <= level_r - 1'b1;
-		end
-	end
-
-	assign full = (level_r == LEVEL_W'(NUM_SLOTS));
-	assign empty = (level_r == '0);
 
 	// prefetch head slots 4 words into hold_r
 	// valid held till job is compelte
@@ -84,8 +69,13 @@ module in_fifo #(
 	rstate_t current_state, next_state;
 
 	logic [FCNT_W-1:0] fcnt_r;
-	logic [SLOT_W-1:0] rd_slot_r;
+	logic [SLOT_W:0] rd_slot_r;
 	wire [WORD_W-1:0] rd_word = fcnt_r[WORD_W-1:0];
+
+	// occupancy from pointer difference; wrap bits make full/empty exact
+	wire [LEVEL_W-1:0] level = wr_slot_r - rd_slot_r;
+	assign empty = (wr_slot_r == rd_slot_r);
+	assign full = (wr_slot_r == {~rd_slot_r[SLOT_W], rd_slot_r[SLOT_W-1:0]});
 
 	assign read_issue = (current_state == RD_FETCH) && (fcnt_r <= FCNT_LAST_ISS);
 	assign cap_en = (current_state == RD_FETCH) && (fcnt_r != '0); // sram read latency = 1
@@ -93,10 +83,8 @@ module in_fifo #(
 	assign matrix_valid = (current_state == RD_VALID);
 	assign pop = matrix_valid && i_matrix_ready;
 
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			fcnt_r <= '0;
-		end else if (current_state != RD_FETCH) begin
+	always_ff @(posedge clk) begin
+		if (current_state != RD_FETCH) begin
 			fcnt_r <= '0;
 		end else if (fcnt_r < FCNT_DONE) begin
 			fcnt_r <= fcnt_r + 1'b1;
@@ -107,7 +95,7 @@ module in_fifo #(
 		if (!rstn) begin
 			rd_slot_r <= '0;
 		end else if (pop) begin
-			rd_slot_r <= (rd_slot_r == SLOT_LAST) ? '0 : rd_slot_r + 1'b1;
+			rd_slot_r <= rd_slot_r + 1'b1; // natural wrap, MSB toggles
 		end
 	end
 
@@ -126,7 +114,7 @@ module in_fifo #(
 			end
 			RD_VALID: begin
 				if (pop) begin // start on next matrix if its waiting
-					next_state = (level_r > LEVEL_W'(1)) ? RD_FETCH : RD_EMPTY;
+					next_state = (level > LEVEL_W'(1)) ? RD_FETCH : RD_EMPTY;
 				end
 			end
 			default: next_state = RD_EMPTY;
@@ -152,8 +140,8 @@ module in_fifo #(
 		end
 	end
 
-	wire [SRAM_AW-1:0] wr_addr = {wr_slot_r, wr_word_r};
-	wire [SRAM_AW-1:0] rd_addr = {rd_slot_r, rd_word};
+	wire [SRAM_AW-1:0] wr_addr = {wr_slot_r[SLOT_W-1:0], wr_word_r};
+	wire [SRAM_AW-1:0] rd_addr = {rd_slot_r[SLOT_W-1:0], rd_word};
 
 	wire csb0, web0, csb1, p0_we;
 	assign p0_we = 1'b1;
@@ -186,7 +174,7 @@ module in_fifo #(
 	assign o_full = full;
 	assign o_matrix_valid = matrix_valid;
 	assign o_matrix_data = hold_r;
-	assign o_level = {{(8-LEVEL_W){1'b0}}, level_r};
+	assign o_level = {{(8-LEVEL_W){1'b0}}, level};
 
 endmodule
 `default_nettype wire

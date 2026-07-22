@@ -56,10 +56,8 @@ module systolic_array #(
 	// compute phase counter
 	logic [COUNT_WIDTH-1:0] cycle_count_r;
 	wire compute_last = (current_state == COMPUTE) && (cycle_count_r == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			cycle_count_r <= '0;
-		end else if (current_state != COMPUTE) begin
+	always_ff @(posedge clk) begin
+		if (current_state != COMPUTE) begin
 			cycle_count_r <= '0;
 		end else begin
 			cycle_count_r <= cycle_count_r + 1'b1;
@@ -71,10 +69,8 @@ module systolic_array #(
 	wire beat = stream_r && i_result_ready;
 	wire stream_last = beat && (rd_idx == IDX_W'(TOTAL_ELEMENTS-1));
 
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			rd_idx <= '0;
-		end else if (!stream_r) begin
+	always_ff @(posedge clk) begin
+		if (!stream_r) begin
 			rd_idx <= '0;
 		end else if (i_result_ready) begin
 			rd_idx <= rd_idx + 1'b1;
@@ -250,10 +246,8 @@ module systolic_array #(
 	wire [IDX_W-1:0] rd_next = rd_idx + 1'b1;
 	wire stream_entry = stream_next && !stream_r;
 
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			c_data_r <= '0;
-		end else if (stream_entry) begin
+	always_ff @(posedge clk) begin
+		if (stream_entry) begin
 			c_data_r <= result_buf[0];
 		end else if (beat) begin
 			c_data_r <= result_buf[rd_next];
