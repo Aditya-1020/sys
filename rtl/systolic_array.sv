@@ -47,22 +47,22 @@ module systolic_array #(
 	// current state never decoded combinationally (was killing my timing)
 	logic [MATRIX_SIZE-1:0] en_col_r, clear_col_r;
 	
-	// gated
-	(* keep *) logic en_feed_r; // feed a mux into col 0
-	(* keep *) logic en_res_r; // result_buf capture
 	logic state_load_r; // a_mat_r; drives busy/start
 	logic stream_r;
 
-	// compute phase counter
+	// compute phase counter. next value is computed explicitly so every
+	// consumer (feed selects, capture strobes, compute_last) can compare
+	// against cycle_count_next and register the result a cycle early.
 	logic [COUNT_WIDTH-1:0] cycle_count_r;
-	wire compute_last = (current_state == COMPUTE) && (cycle_count_r == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
+	wire [COUNT_WIDTH-1:0] cycle_count_next =
+		(current_state == COMPUTE) ? (cycle_count_r + 1'b1) : '0;
 	always_ff @(posedge clk) begin
-		if (current_state != COMPUTE) begin
-			cycle_count_r <= '0;
-		end else begin
-			cycle_count_r <= cycle_count_r + 1'b1;
-		end
+		cycle_count_r <= cycle_count_next;
 	end
+
+	// retimed: registered in the decode block below; cycle-exact with the
+	// old (current_state == COMPUTE) && (cycle_count_r == TOTAL-1)
+	logic compute_last_r;
 
 	localparam integer IDX_W = $clog2(TOTAL_ELEMENTS);
 	logic [IDX_W-1:0] rd_idx;
@@ -91,7 +91,7 @@ module systolic_array #(
 			end
 			CLEAR: next_state = COMPUTE;
 			COMPUTE: begin
-				if (compute_last) begin
+				if (compute_last_r) begin
 					next_state = STREAM;
 				end
 			end
@@ -124,15 +124,14 @@ module systolic_array #(
 		if (!rstn) begin
 			en_col_r <= '0;
 			clear_col_r <= '0;
-			en_feed_r <= 1'b0;
-			en_res_r <= 1'b0;
+			compute_last_r <= 1'b0;
 			stream_r <= 1'b0;
 			state_load_r <= 1'b1; // reset state is LOAD
 		end else begin
 			en_col_r <= en_col_next;
 			clear_col_r <= clear_col_next;
-			en_feed_r <= en_head_next;
-			en_res_r <= en_head_next;
+			compute_last_r <= en_head_next
+				&& (cycle_count_next == COUNT_WIDTH'(TOTAL_COMPUTE_CYCLES-1));
 			stream_r <= stream_next;
 			state_load_r <= state_load_next;
 		end
@@ -218,24 +217,53 @@ module systolic_array #(
 		end
 	end
 
-	// feeding wires
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed
-			wire [COUNT_WIDTH-1:0] elm_a = cycle_count_r - COUNT_WIDTH'(r);
-			wire feed_window = en_feed_r && (elm_a < COUNT_WIDTH'(INNER_DIM));
-			wire [COUNT_WIDTH-1:0] a_idx = feed_window ? elm_a : '0;
-			assign pe_a_in[r][0] = feed_window ? a_mat_r[DATA_WIDTH*(INNER_DIM*a_idx + r) +: DATA_WIDTH] : '0;
+			wire [COUNT_WIDTH-1:0] elm_a_next = cycle_count_next - COUNT_WIDTH'(r);
+			wire feed_window_next = en_head_next && (elm_a_next < COUNT_WIDTH'(INNER_DIM));
+
+			logic feed_window_r;
+			logic [COUNT_WIDTH-1:0] a_idx_r;
+			always_ff @(posedge clk or negedge rstn) begin
+				if (!rstn) begin
+					feed_window_r <= 1'b0;
+				end else begin
+					feed_window_r <= feed_window_next;
+				end
+			end
+			always_ff @(posedge clk) begin
+				a_idx_r <= feed_window_next ? elm_a_next : '0;
+			end
+
+			assign pe_a_in[r][0] = feed_window_r ? a_mat_r[DATA_WIDTH*(INNER_DIM*a_idx_r + r) +: DATA_WIDTH] : '0;
 		end
 	endgenerate
 
+	logic [TOTAL_ELEMENTS-1:0] cap_r;
+	logic [TOTAL_ELEMENTS-1:0] cap_next;
+	always_comb begin
+		cap_next = '0;
+		for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
+			for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
+				cap_next[m*ARRAY_COLS + j] = en_head_next
+					&& (cycle_count_next == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY));
+			end
+		end
+	end
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			cap_r <= '0;
+		end else begin
+			cap_r <= cap_next;
+		end
+	end
+
 	logic [RESULT_WIDTH-1:0] result_buf [0:TOTAL_ELEMENTS-1];
 	always_ff @(posedge clk) begin
-		if (en_res_r) begin
-			for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
-				for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
-					if (cycle_count_r == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY)) begin
-						result_buf[m*ARRAY_COLS + j] <= pe_psum_out[ARRAY_ROWS-1][j];
-					end
+		for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
+			for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
+				if (cap_r[m*ARRAY_COLS + j]) begin
+					result_buf[m*ARRAY_COLS + j] <= pe_psum_out[ARRAY_ROWS-1][j];
 				end
 			end
 		end
