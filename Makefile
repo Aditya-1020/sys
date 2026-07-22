@@ -15,9 +15,6 @@ V_SIM_SRCS = $(V_RTL) $(SV_TB)
 TOP = tb_systolic_array
 SNAPSHOT = $(TOP)_snap
 
-# make xrun DUMP=1
-# array size
-
 N ?= 4
 DW ?= 8
 SIM_GENERICS_tb_systolic_array = -generic_top "N=$(N)" -generic_top "DW=$(DW)"
@@ -48,10 +45,9 @@ export TT_STA_LIB
 export TT_SYNTH_LIB
 export STA_SRAM_LIB
 
-# STA: scripts in scripts/<module>/{synth,sta}.tcl, sdc in constraints/<module>.sdc
 STA_TOP ?= pe
 
-.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl sweep liblane
+.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl sweep liblane lib-last_run report sta-shell
 
 all: xrun
 
@@ -65,9 +61,6 @@ $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
 	@echo '`timescale 1ps/1ps' > $@
 	@sv2v $< >> $@
 
-# SRAM behavioral model is NOT copied into $(VERILOG_SV2V): it must stay out of
-# the VERILOG_FILES glob so Yosys treats the macro as a blackbox (model comes
-# from MACROS.nl -> rtl/sky130_sram_1kbyte_1rw1r_32x256_8.v).
 sv2v_rtl: $(V_RTL)
 
 xcompile: $(V_RTL)
@@ -101,7 +94,6 @@ gls: $(SYNTH_V) $(GLS_CELLS)
 wave:
 	gtkwave dump.vcd &
 
-# make sta STA_TOP=module_name (change lib in TT_STA_LIB if needed)
 sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tcl $(CONSTRAINTS_DIR)/$(STA_TOP).sdc | $(BUILD_DIR)
 	yosys -c scripts/$(STA_TOP)/synth.tcl
 	sta   scripts/$(STA_TOP)/sta.tcl
@@ -109,10 +101,6 @@ sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$
 lint:
 	verilator --lint-only -Wall --timing lint.vlt $(SV_RTL) $(SV_TB) $(addprefix -v ,$(V_MODELS))
 
-# liblane: run the LibreLane flow to GDS + render.
-#   make liblane                        -> timestamped run dir runs/RUN_<ts>/
-#   make liblane RUN=<tag>              -> named run dir   runs/<tag>/   (used by sweep.tcl)
-#   make liblane LIBLANE_CONFIG=<file>  -> alternate config (default config.json)
 RUN ?=
 LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
 LL_RENDER := $(if $(RUN),--run-tag $(RUN),--last-run)
@@ -124,14 +112,17 @@ liblane: $(V_RTL)
 		-rd gds=$$(ls -dt $(LL_RUNDIR)/*-magic-streamout/top.gds | head -1) -rd top=top
 	librelane $(LL_RENDER) --from KLayout.Render $(LIBLANE_CONFIG)
 
-# sweep: deterministic floorplan sizing -> per-candidate `make liblane RUN=sweep_NN`
-# -> compare table, all printed live to the terminal. Edit run_list / pick /
-# targets in scripts/sweep.tcl to choose how many candidates run.
 sweep: $(V_RTL)
 	@tclsh scripts/sweep.tcl
 
 lib-last_run:
 	librelane --last-run --flow openinopenroad $(LIBLANE_CONFIG)
+
+report:
+	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)
+
+sta-shell:
+	scripts/stadebug $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(GUI),--gui,)
 
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) xsim.dir .Xil

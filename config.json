@@ -10,6 +10,20 @@
 	"MAGIC_DRC_USE_GDS": false,
 	"FP_MACRO_HORIZONTAL_HALO": 15,
 	"FP_MACRO_VERTICAL_HALO": 15,
+	"FP_CORE_UTIL": 40,
+	
+	"EXTRA_EXCLUDED_CELLS": [
+		"sky130_fd_sc_hd__clkdlybuf4s*",
+		"sky130_fd_sc_hd__dlygate4sd*",
+		"sky130_fd_sc_hd__dlymetal6s*",
+		"sky130_fd_sc_hd__clkinvlp_*",
+		"sky130_fd_sc_hd__lpflow_*",
+		"sky130_fd_sc_hd__probe_p_*",
+		"sky130_fd_sc_hd__probec_p_*",
+		"sky130_fd_sc_hd__ebufn_*",
+		"sky130_fd_sc_hd__einvn_*",
+		"sky130_fd_sc_hd__einvp_*"
+	],
 	
 	"MACROS": {
 		"sky130_sram_256byte_1rw1r_32x64_8": {

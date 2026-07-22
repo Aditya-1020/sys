@@ -9,4 +9,6 @@ Second run:
     - fixed cycle counters in systolic array
     - added reset propogation and sync resets for spi sepreatly for its clocks
     - configs etc were about the same
+- Found a lot of issues with fifo and systolic array in terms of logic dependencies, fanout.
+- Third run will feature changes made from analyzing sta, delay buffers removed
 
