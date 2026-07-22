@@ -7,7 +7,7 @@
 	"SIGNOFF_SDC_FILE": "dir::constraints/signoff.sdc",
 	"FP_SIZING": "absolute",
 	"DIE_AREA": "0 0 883.66 413.44",
-	"MAGIC_DRC_USE_GDS": true,
+	"MAGIC_DRC_USE_GDS": false,
 	"FP_MACRO_HORIZONTAL_HALO": 15,
 	"FP_MACRO_VERTICAL_HALO": 15,
 	
