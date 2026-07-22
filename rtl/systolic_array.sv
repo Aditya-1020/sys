@@ -32,7 +32,7 @@ module systolic_array #(
 
 	localparam integer FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
 	localparam integer PE_LATENCY = 1;
-	localparam integer FEED_LATENCY = 0; // a feeds combinationally; the pe registers it
+	localparam integer FEED_LATENCY = 1;
 	localparam integer TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY; 
 	localparam integer COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
     

@@ -1,18 +1,11 @@
 `timescale 1ns/1ps
 
-// tb_matmul_accel: end to end over the stream channels (a/b/c) plus the
-//   csr control channel, the same interfaces spi_if drives.
-//   phase 1: single job, irq at results-ready, status bits, pop drain
-//   phase 2: three matrices queued back to back, 48 in-order results and
-//            exactly 3 stream entries (the old ctrl dropped queued jobs)
-//   phase 3: fill all 11 in_fifo slots with en off, overflow flag on the
-//            45th word, w1c, then drain every queued job
-//   make xrun TOP=tb_matmul_accel
+
 module tb_matmul_accel;
 	localparam integer DW = 32;
 	localparam integer N = 4;
 	localparam integer EW = 8;
-	localparam integer NUM_SLOTS = 11; // in_fifo capacity in matrices
+	localparam integer NUM_SLOTS = 64; // in_fifo capacity in matrices
 	localparam integer RES_DEPTH = 4;  // out_fifo depth
 	localparam integer BATCH = 3;
 	localparam int SGN_MIN = -(1 << (EW-1));

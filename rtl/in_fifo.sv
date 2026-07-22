@@ -2,7 +2,7 @@
 `timescale 1ps/1ps
 
 module in_fifo #(
-	parameter integer NUM_SLOTS = 11,  // 10 in-flight + 1 being written
+	parameter integer NUM_SLOTS = 64, // sized buffer to mmeory available (spi is killing the input)
 	parameter integer MAT_W = 128,
 	parameter integer DATA_W = 32
 )(
@@ -27,11 +27,11 @@ module in_fifo #(
 );
 	localparam integer WORDS = MAT_W / DATA_W; // 4 words per matrix
 	localparam integer WORD_W = $clog2(WORDS); // 2
-	localparam integer SLOT_W = $clog2(NUM_SLOTS); // 4
-	localparam integer LEVEL_W = $clog2(NUM_SLOTS + 1); // 4
+	localparam integer SLOT_W = $clog2(NUM_SLOTS); // 6
+	localparam integer LEVEL_W = $clog2(NUM_SLOTS + 1); // 7
 	localparam integer FCNT_W = $clog2(WORDS + 1); // 3, counts 0 -WORDS
 	localparam integer SRAM_AW = 8;
-	localparam integer PAD_W = SRAM_AW - SLOT_W - WORD_W;
+	localparam integer PAD_W = SRAM_AW - SLOT_W - WORD_W; // 0
 	localparam logic [WORD_W-1:0] WORD_LAST = WORD_W'(WORDS - 1); // 3
 	localparam logic [SLOT_W-1:0] SLOT_LAST = SLOT_W'(NUM_SLOTS - 1);
 	localparam logic [FCNT_W-1:0] FCNT_DONE = FCNT_W'(WORDS); // 4
@@ -153,8 +153,8 @@ module in_fifo #(
 		end
 	end
 
-	wire [SRAM_AW-1:0] wr_addr = {{PAD_W{1'b0}}, wr_slot_r, wr_word_r};
-	wire [SRAM_AW-1:0] rd_addr = {{PAD_W{1'b0}}, rd_slot_r, rd_word};
+	wire [SRAM_AW-1:0] wr_addr = SRAM_AW'({wr_slot_r, wr_word_r});
+	wire [SRAM_AW-1:0] rd_addr = SRAM_AW'({rd_slot_r, rd_word});
 
 	wire csb0, web0, csb1, p0_we;
 	assign p0_we = 1'b1;
