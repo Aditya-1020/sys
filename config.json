@@ -3,22 +3,31 @@
 	"VERILOG_FILES": "dir::verilog_sv2v/*.v",
 	"CLOCK_PORT": "clk",
 	"CLOCK_PERIOD": 5,
-	"PNR_SDC_FILE": "dir::constraints/top.sdc",
-	"SIGNOFF_SDC_FILE": "dir::constraints/top.sdc",
+	"PNR_SDC_FILE": "dir::constraints/pnr.sdc",
+	"SIGNOFF_SDC_FILE": "dir::constraints/signoff.sdc",
 	"FP_SIZING": "absolute",
-	"DIE_AREA": [0, 0, 740, 740],
+	"DIE_AREA": [0, 0, 560, 900],
 	"MAGIC_DRC_USE_GDS": true,
 
+	"FP_MACRO_HORIZONTAL_HALO": 15,
+	"FP_MACRO_VERTICAL_HALO": 15,
+	
 	"MACROS": {
-		"sky130_sram_1kbyte_1rw1r_32x256_8": {
+		"sky130_sram_256byte_1rw1r_32x64_8": {
 			"instances": {
-				"u_accel.u_in_fifo.sram": {}
+				"u_accel.u_in_fifo.sram": {
+					"location": [40, 250],
+					"orientation": "N"
+				}
 			},
-			"gds": ["pdk_dir::libs.ref/sky130_sram_macros/gds/sky130_sram_1kbyte_1rw1r_32x256_8.gds"],
-			"lef": ["pdk_dir::libs.ref/sky130_sram_macros/lef/sky130_sram_1kbyte_1rw1r_32x256_8.lef"],
-			"nl": ["dir::rtl/sky130_sram_1kbyte_1rw1r_32x256_8.v"],
+			"gds": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8.gds"],
+			"lef": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8.lef"],
+			"nl": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8.v"],
+			"spice": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8.lvs.sp"],
 			"lib": {
-				"*": ["pdk_dir::libs.ref/sky130_sram_macros/lib/sky130_sram_1kbyte_1rw1r_32x256_8_TT_1p8V_25C.lib"]
+				"*_tt_*": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8_TT_1p8V_25C.lib"],
+				"*_ss_*": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8_SS_1p8V_25C.lib"],
+				"*_ff_*": ["dir::sram_32x64/build/sky130_sram_256byte_1rw1r_32x64_8_FF_1p8V_25C.lib"]
 			}
 		}
 	},

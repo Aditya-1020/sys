@@ -1,7 +1,7 @@
 create_clock -name SYS_CLK -period 5.0 [get_ports clk]
 set_clock_uncertainty 0.25 [get_clocks SYS_CLK]
 
-create_clock -name SPI_CLK -period 5.0 [get_ports spi_sclk]
+create_clock -name SPI_CLK -period 10.0 [get_ports spi_sclk]
 set_clock_uncertainty 0.50 [get_clocks SPI_CLK]
 
 set_clock_groups -asynchronous -group {SYS_CLK} -group {SPI_CLK}
