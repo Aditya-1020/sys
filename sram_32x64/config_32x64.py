@@ -13,9 +13,14 @@ tech_name = "sky130"
 process_corners = ["FF", "TT", "SS"]
 supply_voltages = [1.95, 1.80, 1.60]
 temperatures = [-40, 25, 100]
+nominal_corner_only = True
+
+spice_name = "ngspice"
 
 output_path = "build"
 output_name = "sky130_sram_256byte_1rw1r_32x64_8"
 
 analytical_delay = False
-check_lvsdrc = False
+
+num_threads = 4
+num_sim_threads = 4
