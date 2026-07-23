@@ -10,9 +10,10 @@ module tb_matmul_accel;
 	localparam integer BATCH = 3;
 	localparam int SGN_MIN = -(1 << (EW-1));
 
-	localparam logic [1:0] SEL_CTRL = 2'd0;
-	localparam logic [1:0] SEL_STATUS = 2'd1;
-	localparam logic [1:0] SEL_IRQ = 2'd2;
+	// one-hot, matches spi_if's decoded o_csr_sel
+	localparam logic [2:0] SEL_CTRL = 3'b001;
+	localparam logic [2:0] SEL_STATUS = 3'b010;
+	localparam logic [2:0] SEL_IRQ = 3'b100;
 
 	localparam int ST_BUSY = 0, ST_AEMPTY = 1, ST_AFULL = 2, ST_DONE = 3, ST_RESV = 4;
 
@@ -21,7 +22,7 @@ module tb_matmul_accel;
 
 	logic rstn;
 	logic csr_wr, csr_rd;
-	logic [1:0] csr_sel;
+	logic [2:0] csr_sel;
 	logic [DW-1:0] csr_wdata, csr_rdata;
 	logic csr_rvalid;
 	logic a_valid;
@@ -85,7 +86,7 @@ module tb_matmul_accel;
 	endtask
 
 	// channel drivers, single cycle pulses like spi_if emits
-	task automatic reg_write(input logic [1:0] sel, input logic [DW-1:0] data);
+	task automatic reg_write(input logic [2:0] sel, input logic [DW-1:0] data);
 		@(negedge clk);
 		csr_wr <= 1'b1;
 		csr_sel <= sel;
@@ -94,7 +95,7 @@ module tb_matmul_accel;
 		csr_wr <= 1'b0;
 	endtask
 
-	task automatic reg_read(input logic [1:0] sel, output logic [DW-1:0] data);
+	task automatic reg_read(input logic [2:0] sel, output logic [DW-1:0] data);
 		@(negedge clk);
 		csr_rd <= 1'b1;
 		csr_sel <= sel;

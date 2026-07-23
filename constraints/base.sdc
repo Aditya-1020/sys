@@ -1,5 +1,5 @@
 set SYS_PERIOD 12.0
-set SPI_PERIOD 10.0
+set SPI_PERIOD 20.0
 
 create_clock -name SYS_CLK -period $SYS_PERIOD [get_ports clk]
 create_clock -name SPI_CLK -period $SPI_PERIOD [get_ports spi_sclk]
@@ -21,6 +21,7 @@ set_output_delay -clock SYS_CLK -min 0.0 [get_ports o_irq]
 set_driving_cell -lib_cell sky130_fd_sc_hd__inv_2 -pin Y [get_ports {spi_mosi spi_cs_n rstn}]
 set_load 0.03 [all_outputs]
 
-set_max_transition 0.75 [current_design]
-set_max_fanout 16 [current_design]
+set_input_transition 0.15 [get_ports {clk spi_sclk}]
+set_max_transition 1.0 [current_design]
 
+set_max_fanout 16 [current_design]
