@@ -176,6 +176,7 @@ module in_fifo #(
 	assign csb1 = ~read_issue;
 
 	wire [DATA_W-1:0] dout_not_used;
+	wire clk_rd = ~clk;
 
 	(* keep, keep_hierarchy *)
 	sky130_sram_256byte_1rw1r_32x64_8 sram (
@@ -192,7 +193,7 @@ module in_fifo #(
 		.din0(i_wr_data),
 		.dout0(dout_not_used),
 		// port 1: read
-		.clk1(clk),
+		.clk1(clk_rd),
 		.csb1(csb1),
 		.addr1(rd_addr),
 		.dout1(sram_rd_data)

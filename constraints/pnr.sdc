@@ -10,3 +10,11 @@ set_clock_transition 0.15 [all_clocks]
 
 set_timing_derate -early 0.95
 set_timing_derate -late  1.05
+
+set sram_dout1 [get_pins -quiet {u_accel.u_in_fifo.sram/dout1[*]}]
+
+if {[llength $sram_dout1] > 0} {
+	set_max_capacitance 0.025 $sram_dout1
+} else {
+	puts "sram dout1 pins not found"
+}
