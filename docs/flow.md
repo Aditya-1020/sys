@@ -1,0 +1,11 @@
+# flow tuning notes (inactive)
+- RUN_EQY: true                     # formal equivalence
+- SYNTH_STRATEGY: "AREA 0"          # switch to "DELAY 3" when chasing Fmax
+- MAX_FANOUT_CONSTRAINT: 10
+- PL_RESIZER_HOLD_SLACK_MARGIN: 0.1 # hold fix slow corners
+- DIODE_ON_PORTS: "in"              # antenna repair for long nets
+- RUN_POST_CTS_RESIZER_TIMING: true
+- RUN_POST_GRT_RESIZER_TIMING: true
+- SYNTH_MUL_BOOTH: true
+- SYNTH_ADDER_TYPE: YOSYS | FA | RCA | CSA
+- SYNTH_ABC_DFF: true               # eliminate identical FFs
