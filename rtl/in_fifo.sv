@@ -164,6 +164,9 @@ module in_fifo #(
 	assign web0 = ~p0_we; // low = wr
 	assign csb1 = ~read_issue;
 
+	wire [DATA_W-1:0] dout_not_used;
+
+	(* keep, keep_hierarchy *)
 	sky130_sram_256byte_1rw1r_32x64_8 sram (
 		`ifdef USE_POWER_PINS
 		.vccd1(VCCD1),
@@ -176,7 +179,7 @@ module in_fifo #(
 		.wmask0(4'hF),
 		.addr0(wr_addr),
 		.din0(i_wr_data),
-		.dout0(),
+		.dout0(dout_not_used),
 		// port 1: read
 		.clk1(clk),
 		.csb1(csb1),

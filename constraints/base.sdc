@@ -1,5 +1,5 @@
-set SYS_PERIOD 5.0
-set SPI_PERIOD 20.0
+set SYS_PERIOD 12.0
+set SPI_PERIOD 10.0
 
 create_clock -name SYS_CLK -period $SYS_PERIOD [get_ports clk]
 create_clock -name SPI_CLK -period $SPI_PERIOD [get_ports spi_sclk]
