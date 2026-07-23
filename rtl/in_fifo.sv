@@ -78,14 +78,15 @@ module in_fifo #(
 	assign full = (wr_slot_r == {~rd_slot_r[SLOT_W], rd_slot_r[SLOT_W-1:0]});
 
 	assign read_issue = (current_state == RD_FETCH) && (fcnt_r <= FCNT_LAST_ISS);
-	// assign cap_en = (current_state == RD_FETCH) && (fcnt_r != '0); // sram read latency = 1
 
-	(* keep *) logic [WORD_W-1:0] cap_en_r;
+	(* keep *) logic [WORDS-1:0] cap_en_r, cap_en_rr;
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			cap_en_r <= '0;
+			cap_en_rr <= '0;
 		end else begin
-			cap_en_r <= {WORDS{read_issue}};
+			cap_en_r  <= {cap_en_r[WORDS-2:0], read_issue};
+			cap_en_rr <= cap_en_r;
 		end
 	end
 
@@ -140,15 +141,25 @@ module in_fifo #(
 	end
 
 	// shift register
-	// word0 enters at [31;0] after 4 shift
 	logic [MAT_W-1:0] hold_r;
-	wire [DATA_W-1:0] rd_data;
+
+	wire [DATA_W-1:0] sram_rd_data;
+	logic [DATA_W-1:0] rd_data;
+	
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			rd_data <= '0;
+		end else if (cap_en_rr[WORDS-1]) begin
+			rd_data <= sram_rd_data;
+		end
+	end
+
 
 	genvar s;
 	generate
 		for (s = 0; s< WORDS; s = s+1) begin : gen_hold
 			always_ff @(posedge clk) begin
-				if (cap_en_r[s]) begin
+				if (cap_en_rr[s]) begin
 					hold_r[DATA_W*s +: DATA_W] <= (s == WORDS-1) ? rd_data : hold_r[DATA_W*(s+1) +: DATA_W];
 				end
 			end
@@ -184,7 +195,7 @@ module in_fifo #(
 		.clk1(clk),
 		.csb1(csb1),
 		.addr1(rd_addr),
-		.dout1(rd_data)
+		.dout1(sram_rd_data)
 	);
 
 	assign o_wr_ready = wr_ready;

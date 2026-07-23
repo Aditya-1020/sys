@@ -13,7 +13,7 @@ module matmul_accel #(
 
 	input wire i_csr_wr,
 	input wire i_csr_rd,
-	input wire [1:0] i_csr_sel,
+	input wire [2:0] i_csr_sel,
 	input wire [CSR_DATA_W-1:0] i_csr_wdata,
 	output wire [CSR_DATA_W-1:0] o_csr_rdata,
 	output wire o_csr_rvalid,

@@ -47,9 +47,20 @@ module pe #(
 	logic signed [2*DATA_WIDTH:0] mult_w;
 	assign mult_w = a_r * w_r;
 
+	// pipeline stage: registered product so the multiply and the psum add
+	// are separate cycles (PE_LATENCY = 2)
+	logic signed [2*DATA_WIDTH:0] mult_r;
+	always_ff @(posedge clk) begin
+		if (i_clear) begin
+			mult_r <= '0;
+		end else if (i_enable) begin
+			mult_r <= mult_w;
+		end
+	end
+
 	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
 	always_comb begin
-		next_acc = signed'(i_psum) + ACC_WIDTH'(mult_w);
+		next_acc = signed'(i_psum) + ACC_WIDTH'(mult_r);
 	end
 
 	always_ff @(posedge clk) begin

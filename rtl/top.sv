@@ -28,7 +28,7 @@ module top #(
 
     // csr channel, control/status only
     wire csr_wr_w, csr_rd_w, csr_rvalid_w;
-    wire [1:0] csr_sel_w;
+    wire [2:0] csr_sel_w;
     wire [CSR_DATA_W-1:0] csr_wdata_w, csr_rdata_w;
 
     // data channels, straight between the spi shifter and the fifos/pes

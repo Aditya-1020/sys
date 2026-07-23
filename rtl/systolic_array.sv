@@ -31,10 +31,11 @@ module systolic_array #(
 	localparam integer INNER_DIM = MATRIX_SIZE; // K MACs per column
 
 	localparam integer FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
-	localparam integer PE_LATENCY = 1;
+	localparam integer PE_LATENCY = 2; // a_r -> mult_r -> accumulator
 	localparam integer FEED_LATENCY = 1;
 	localparam integer TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY; 
 	localparam integer COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
+	localparam integer A_IDX_W = $clog2(INNER_DIM); // 2
     
 	typedef enum logic [1:0] {
 		LOAD,  // idle cum receive a and b
@@ -244,7 +245,7 @@ module systolic_array #(
 			wire feed_window_next = en_head_next && (elm_a_next < COUNT_WIDTH'(INNER_DIM));
 
 			logic feed_window_r;
-			logic [COUNT_WIDTH-1:0] a_idx_r;
+			logic [A_IDX_W-1:0] a_idx_r;
 			always_ff @(posedge clk or negedge rstn) begin
 				if (!rstn) begin
 					feed_window_r <= 1'b0;
@@ -253,7 +254,7 @@ module systolic_array #(
 				end
 			end
 			always_ff @(posedge clk) begin
-				a_idx_r <= feed_window_next ? elm_a_next : '0;
+				a_idx_r <= feed_window_next ? A_IDX_W'(elm_a_next) : '0;
 			end
 
 			assign pe_a_in[r][0] = feed_window_r ? a_mat_r[DATA_WIDTH*(INNER_DIM*a_idx_r + r) +: DATA_WIDTH] : '0;
@@ -267,7 +268,7 @@ module systolic_array #(
 		for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
 			for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
 				cap_next[m*ARRAY_COLS + j] = en_head_next
-					&& (cycle_count_next == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY));
+					&& (cycle_count_next == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY + (PE_LATENCY-1)));
 			end
 		end
 	end
