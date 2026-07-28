@@ -107,6 +107,7 @@ module systolic_array #(
 	end
 
 	// registed state decode
+	// NOTE; decode these from current_state and cycle coutner instead? remove nexT_state or optimize it more
 	wire en_head_next = (next_state == COMPUTE);
 	wire clear_head_next = (next_state == CLEAR);
 	wire stream_next = (next_state == STREAM);

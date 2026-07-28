@@ -125,10 +125,12 @@ module ctrl_unit #(
 		end
 	end
 
+	logic [MAT_W-1:0] matrix_shift;
 	always_ff @(posedge clk) begin
-		a_row_r <= i_matrix_data[ROW_W*row_cnt_r +: ROW_W];
-	end
-	
+		a_row_r <= matrix_shift[ROW_W-1:0];
+		matrix_shift <= matrix_shift >> ROW_W;
+	end	
+
 	assign o_a_valid = a_valid_r;
 	assign o_a_row = a_row_r;
 

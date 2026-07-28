@@ -58,10 +58,9 @@ module pe #(
 		end
 	end
 
-	logic signed [ACC_WIDTH-1:0] accumulator, next_acc;
-	always_comb begin
-		next_acc = signed'(i_psum) + ACC_WIDTH'(mult_r);
-	end
+	logic signed [ACC_WIDTH-1:0] accumulator;
+	wire signed [ACC_WIDTH-1:0] next_acc;
+	assign next_acc = signed'(i_psum) + ACC_WIDTH'(mult_r);
 
 	always_ff @(posedge clk) begin
 		if (i_clear) begin
