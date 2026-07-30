@@ -1,4 +1,4 @@
-`default_nettype wire
+`default_nettype none
 `timescale 1ps/1ps
 
 module systolic_array #(
@@ -33,10 +33,13 @@ module systolic_array #(
 	localparam integer FILL_CYCLES = (ARRAY_ROWS-1) + (ARRAY_COLS-1);
 	localparam integer PE_LATENCY = 2; // a_r -> mult_r -> accumulator
 	localparam integer FEED_LATENCY = 1;
-	localparam integer TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY; 
+	localparam integer TOTAL_COMPUTE_CYCLES = FILL_CYCLES + INNER_DIM + FEED_LATENCY + PE_LATENCY;
 	localparam integer COUNT_WIDTH = $clog2(TOTAL_COMPUTE_CYCLES + 1);
-	localparam integer A_IDX_W = $clog2(INNER_DIM); // 2
-    
+
+	localparam integer DRAIN_BASE = ARRAY_ROWS + FEED_LATENCY + (PE_LATENCY-1);
+	localparam integer COL_W = $clog2(ARRAY_COLS);
+	localparam integer DRAIN_W = ARRAY_ROWS * RESULT_WIDTH;
+
 	typedef enum logic [1:0] {
 		LOAD,  // idle cum receive a and b
 		CLEAR,
@@ -47,8 +50,8 @@ module systolic_array #(
 
 	(* keep *) logic [ARRAY_ROWS-1:0] en_head_r, clear_head_r;
 	
-	(* keep *) logic state_load_r;                 // control copy: o_busy, start_array
-	(* keep *) logic [MATRIX_SIZE-1:0] a_ld_sel_r; // a_mat_r enables, one per ROW_W slice
+	(* keep *) logic state_load_r; // control copy: o_busy, start_array
+	(* keep *) logic [MATRIX_SIZE-1:0] a_ld_sel_r; // a row shift reg en per row
 	logic stream_r;
 
 	// compute phase counter
@@ -61,8 +64,12 @@ module systolic_array #(
 	logic compute_last_r;
 	localparam integer IDX_W = $clog2(TOTAL_ELEMENTS);
 	logic [IDX_W-1:0] rd_idx;
+	wire [IDX_W-1:0] rd_next = rd_idx + 1'b1;
 	wire beat = stream_r && i_result_ready;
 	wire stream_last = beat && (rd_idx == IDX_W'(TOTAL_ELEMENTS-1));
+
+	wire [COL_W-1:0] rd_col = rd_idx[COL_W-1:0]; // pick drain read
+	wire [COL_W-1:0] rd_col_next = rd_next[COL_W-1:0];
 
 	always_ff @(posedge clk) begin
 		if (!stream_r) begin
@@ -74,7 +81,7 @@ module systolic_array #(
 
 	assign o_busy = !state_load_r;
 	wire start_array = i_start && state_load_r;
-	
+
 	// next state logic
 	always_comb begin
 		next_state = current_state;
@@ -107,7 +114,6 @@ module systolic_array #(
 	end
 
 	// registed state decode
-	// NOTE; decode these from current_state and cycle coutner instead? remove nexT_state or optimize it more
 	wire en_head_next = (next_state == COMPUTE);
 	wire clear_head_next = (next_state == CLEAR);
 	wire stream_next = (next_state == STREAM);
@@ -131,7 +137,7 @@ module systolic_array #(
 			a_ld_sel_r <= {MATRIX_SIZE{state_load_next}};
 		end
 	end
-	
+
 	// sticky done
 	logic done_r, done_st;
 	always_comb begin
@@ -220,33 +226,13 @@ module systolic_array #(
 		end
 	endgenerate
 
-	logic [INPUT_PACKED_W-1:0] a_mat_r;
-	genvar s;
-	generate
-		for (s = 0; s < MATRIX_SIZE; s = s + 1) begin : gen_a_load
-			if (s == MATRIX_SIZE-1) begin : gen_a_load_head
-				always_ff @(posedge clk) begin
-					if (i_a_valid && a_ld_sel_r[s]) begin
-						a_mat_r[ROW_W*s +: ROW_W] <= i_ld_a;
-					end
-				end
-			end else begin : gen_a_load_shift
-				always_ff @(posedge clk) begin
-					if (i_a_valid && a_ld_sel_r[s]) begin
-						a_mat_r[ROW_W*s +: ROW_W] <= a_mat_r[ROW_W*(s+1) +: ROW_W];
-					end
-				end
-			end
-		end
-	endgenerate
-
+	// shift reg per row
 	generate
 		for (r = 0; r < ARRAY_ROWS; r = r + 1) begin : gen_a_feed
 			wire [COUNT_WIDTH-1:0] elm_a_next = cycle_count_next - COUNT_WIDTH'(r);
 			wire feed_window_next = en_head_next && (elm_a_next < COUNT_WIDTH'(INNER_DIM));
 
 			logic feed_window_r;
-			logic [A_IDX_W-1:0] a_idx_r;
 			always_ff @(posedge clk or negedge rstn) begin
 				if (!rstn) begin
 					feed_window_r <= 1'b0;
@@ -254,54 +240,60 @@ module systolic_array #(
 					feed_window_r <= feed_window_next;
 				end
 			end
+
+			wire a_ld_en = i_a_valid && a_ld_sel_r[r];
+			wire a_sh_en = a_ld_en || feed_window_r;
+			wire [DATA_WIDTH-1:0] a_fill = a_ld_en ? i_ld_a[DATA_WIDTH*r +: DATA_WIDTH] : {DATA_WIDTH{1'b0}};
+
+			logic [ROW_W-1:0] a_row_r;
 			always_ff @(posedge clk) begin
-				a_idx_r <= feed_window_next ? A_IDX_W'(elm_a_next) : '0;
+				if (a_sh_en) begin
+					a_row_r <= {a_row_r[ROW_W-DATA_WIDTH-1:0], a_fill};
+				end
 			end
 
-			assign pe_a_in[r][0] = feed_window_r ? a_mat_r[DATA_WIDTH*(INNER_DIM*a_idx_r + r) +: DATA_WIDTH] : '0;
+			assign pe_a_in[r][0] = feed_window_r ? a_row_r[ROW_W-1 -: DATA_WIDTH] : {DATA_WIDTH{1'b0}};
 		end
 	endgenerate
 
-	logic [TOTAL_ELEMENTS-1:0] cap_r;
-	logic [TOTAL_ELEMENTS-1:0] cap_next;
-	always_comb begin
-		cap_next = '0;
-		for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
-			for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
-				cap_next[m*ARRAY_COLS + j] = en_head_next
-					&& (cycle_count_next == COUNT_WIDTH'(m + ARRAY_ROWS + j + FEED_LATENCY + (PE_LATENCY-1)));
-			end
-		end
-	end
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			cap_r <= '0;
-		end else begin
-			cap_r <= cap_next;
-		end
-	end
+	// drain result; shift reg per col
+	wire [RESULT_WIDTH-1:0] drain_tail [0:ARRAY_COLS-1];
+	generate
+		for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_drain
+			wire [COUNT_WIDTH-1:0] drain_off_next = cycle_count_next - COUNT_WIDTH'(DRAIN_BASE + c);
+			wire drain_en_next = en_head_next && (drain_off_next < COUNT_WIDTH'(ARRAY_ROWS));
 
-	logic [RESULT_WIDTH-1:0] result_buf [0:TOTAL_ELEMENTS-1];
-	always_ff @(posedge clk) begin
-		for (int unsigned m = 0; m < ARRAY_ROWS; m++) begin
-			for (int unsigned j = 0; j < ARRAY_COLS; j++) begin
-				if (cap_r[m*ARRAY_COLS + j]) begin
-					result_buf[m*ARRAY_COLS + j] <= pe_psum_out[ARRAY_ROWS-1][j];
+			logic drain_en_r;
+			always_ff @(posedge clk or negedge rstn) begin
+				if (!rstn) begin
+					drain_en_r <= 1'b0;
+				end else begin
+					drain_en_r <= drain_en_next;
 				end
 			end
+
+			wire pop = beat && (rd_col == COL_W'(c));
+			wire sh_en = drain_en_r || pop;
+
+			logic [DRAIN_W-1:0] col_r;
+			always_ff @(posedge clk) begin
+				if (sh_en) begin
+					col_r <= {pe_psum_out[ARRAY_ROWS-1][c], col_r[DRAIN_W-1 -: (DRAIN_W-RESULT_WIDTH)]};
+				end
+			end
+			assign drain_tail[c] = col_r[RESULT_WIDTH-1:0];
 		end
-	end
+	endgenerate
 
 	// registered streaming
 	logic [RESULT_WIDTH-1:0] c_data_r;
-	wire [IDX_W-1:0] rd_next = rd_idx + 1'b1;
 	wire stream_entry = stream_next && !stream_r;
 
 	always_ff @(posedge clk) begin
 		if (stream_entry) begin
-			c_data_r <= result_buf[0];
+			c_data_r <= drain_tail[0];
 		end else if (beat) begin
-			c_data_r <= result_buf[rd_next];
+			c_data_r <= drain_tail[rd_col_next];
 		end
 	end
 
@@ -309,4 +301,4 @@ module systolic_array #(
 	assign o_result_data  = c_data_r;
 
 endmodule
-`default_nettype none
+`default_nettype wire
