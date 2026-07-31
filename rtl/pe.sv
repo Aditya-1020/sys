@@ -13,15 +13,17 @@ module pe #(
 	input wire i_w_load,
 	input wire signed [DATA_WIDTH-1:0] i_a,
 	input wire signed [DATA_WIDTH-1:0] i_b,
-	input wire [ACC_WIDTH-1:0] i_psum,
-	output wire [DATA_WIDTH-1:0] o_a,
-	output wire [ACC_WIDTH-1:0] o_psum,
+	input wire signed [ACC_WIDTH-1:0] i_psum,
+	output wire signed [DATA_WIDTH-1:0] o_a,
+	output wire signed [ACC_WIDTH-1:0] o_psum,
 	output wire o_enable,
 	output wire o_clear
 );
 	logic signed [DATA_WIDTH-1:0] a_r; // pass through only
 	always_ff @(posedge clk) begin
-		if (i_enable) begin
+		if (i_clear) begin
+			a_r <= '0;
+		end else if (i_enable) begin
 			a_r <= i_a;
 		end
 	end
@@ -47,8 +49,6 @@ module pe #(
 	logic signed [2*DATA_WIDTH:0] mult_w;
 	assign mult_w = a_r * w_r;
 
-	// pipeline stage: registered product so the multiply and the psum add
-	// are separate cycles (PE_LATENCY = 2)
 	logic signed [2*DATA_WIDTH:0] mult_r;
 	always_ff @(posedge clk) begin
 		if (i_clear) begin
