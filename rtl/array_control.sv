@@ -53,7 +53,7 @@ module array_control #(
 	wire load_w_now = i_load_w || !w_valid_r;
 
 	wire start_job = (current_state == IDLE) && i_enable && i_fill_done && i_room;
-	wire [PTR_W-1:0] last_word = load_w_r ? PTR_W'(JOB_WORDS-1) : PTR_W'(MATRIX_SIZE-1);
+	wire [PTR_W-1:0] last_word = load_w_r ? unsigned'(PTR_W'(JOB_WORDS-1)) : unsigned'(PTR_W'(MATRIX_SIZE-1));
 	wire fetch_last = (current_state == FETCH) && (rd_ptr_r == last_word);
 	wire job_end = (current_state == RUN) && i_sys_done;
 
@@ -124,7 +124,7 @@ module array_control #(
 			rd_isb_r <= 1'b0;
 		end else begin
 			rd_vld_r <= o_cs_array;
-			rd_isb_r <= load_w_r && (rd_ptr_r < PTR_W'(MATRIX_SIZE));
+			rd_isb_r <= load_w_r && (rd_ptr_r < unsigned'(PTR_W'(MATRIX_SIZE)));
 			rd_lane_r <= rd_ptr_r[LANE_W-1:0];
 		end
 	end
