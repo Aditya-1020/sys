@@ -49,7 +49,6 @@ module array_control #(
 	state_t current_state, next_state;
 
 	logic [PTR_W-1:0] rd_ptr_r;
-
 	logic w_valid_r, load_w_r;
 	wire load_w_now = i_load_w || !w_valid_r;
 
