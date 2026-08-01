@@ -4,8 +4,8 @@
 module res_cap_fifo #(
 	parameter integer MATRIX_SIZE = 4,
 	parameter integer DATA_WIDTH = 8,
-	parameter integer JOBS = 2,
-
+	
+	localparam integer JOBS = 2,
 	localparam integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 18
 	localparam integer TOTAL_ELEMENTS = MATRIX_SIZE * MATRIX_SIZE, // 16
 	localparam integer DEPTH = JOBS * TOTAL_ELEMENTS, // 32

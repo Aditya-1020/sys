@@ -14,12 +14,14 @@ module pp_buf_sram (
 	input wire i_dma_cs,
 	input wire i_dma_we,
 	input wire [3:0] i_dma_mask,
-	input wire [6:0] i_dma_addr,
+	input wire [5:0] i_dma_addr, // 64 words per macro
 	input wire [31:0] i_dma_wdata,
 	input wire i_cs_array, // array chip sel
-	input wire [6:0] i_addr_array,
+	input wire [5:0] i_addr_array,
 	output wire [31:0] o_array_rdata // output to pes
 );
+	wire [31:0] m0_dout, m1_dout;
+	
 	reg ping_pong_sel_r;
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
@@ -28,37 +30,48 @@ module pp_buf_sram (
 			ping_pong_sel_r <= ~ping_pong_sel_r;
 		end
 	end
-
 	assign o_ping_pong_sel = ping_pong_sel_r;
+	
+	wire m0_dma = (ping_pong_sel_r == 1'b0);
+	wire m0_ce = m0_dma ? i_dma_cs : i_cs_array;
+	wire m0_we = m0_dma ? i_dma_we : 1'b0;
+	wire [5:0] m0_addr = m0_dma ? i_dma_addr : i_addr_array;
 
-	wire [7:0] sram_addr0, sram_addr1;
-	assign sram_addr0 = {ping_pong_sel_r, i_dma_addr};
-	assign sram_addr1 = {~ping_pong_sel_r, i_addr_array};
+	wire m1_ce = m0_dma ? i_cs_array : i_dma_cs;
+	wire m1_we = m0_dma ? 1'b0 : i_dma_we;
+	wire [5:0] m1_addr = m0_dma ? i_addr_array : i_dma_addr;
 
-	wire csb0_w = ~i_dma_cs;
-	wire web0_w = ~i_dma_we;
-	wire csb1_w = ~i_cs_array;
-
-	sky130_sram_1kbyte_1rw1r_32x256_8 sky_sram_cell (
+	sram22_64x32m4w8 u_m0 (
 	`ifdef USE_POWER_PINS
-		.vccd1(vccd1),
-		.vssd1(vssd1),
+		.vdd(vccd1),
+		.vss(vssd1),
 	`endif
-		// Port 0: RW
-		.clk0 (clk),
-		.csb0 (csb0_w),
-		.web0 (web0_w),
-		.wmask0(i_dma_mask),
-		.addr0(sram_addr0),
-		.din0 (i_dma_wdata),
-		.dout0(),
-
-		// Port 1: R
-		.clk1 (clk),
-		.csb1 (csb1_w),
-		.addr1(sram_addr1),
-		.dout1(o_array_rdata)
+		.clk(clk),
+		.rstb(rstn),
+		.ce(m0_ce),
+		.we(m0_we),
+		.wmask(i_dma_mask),
+		.addr(m0_addr),
+		.din(i_dma_wdata),
+		.dout(m0_dout)
 	);
+
+	sram22_64x32m4w8 u_m1 (
+	`ifdef USE_POWER_PINS
+		.vdd(vccd1),
+		.vss(vssd1),
+	`endif
+		.clk(clk),
+		.rstb(rstn),
+		.ce(m1_ce),
+		.we(m1_we),
+		.wmask(i_dma_mask),
+		.addr(m1_addr),
+		.din(i_dma_wdata),
+		.dout(m1_dout)
+	);
+
+	assign o_array_rdata = m0_dma ? m1_dout : m0_dout;
 
 endmodule
 `default_nettype wire

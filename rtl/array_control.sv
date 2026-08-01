@@ -4,7 +4,7 @@
 module array_control #(
 	parameter integer MATRIX_SIZE = 4,
 	parameter integer DATA_WIDTH = 8,
-	parameter integer SRAM_ADDR_W = 7, 
+	parameter integer SRAM_ADDR_W = 6,
 	
 	parameter integer ROW_W = MATRIX_SIZE*DATA_WIDTH, // 32, packed matrix row
 	parameter integer LANE_W = $clog2(MATRIX_SIZE)
