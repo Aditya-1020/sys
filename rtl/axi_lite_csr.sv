@@ -6,7 +6,7 @@ module axi_lite_csr #(
 	parameter int DATA_WIDTH = 32
 )(
 	input wire aclk,
-	input wire aresetn, // async reset sync deassert (HANDLE THIS IN TOP)
+	input wire aresetn,
 
 	// write addr channel
 	input wire [ADDR_WIDTH-1:0] i_s_axil_awaddr,
@@ -38,8 +38,11 @@ module axi_lite_csr #(
 	// csr interface
 	input wire [DATA_WIDTH-1:0] csr_status, // status from 0x04
 	output logic [DATA_WIDTH-1:0] csr_ctrl, // en/go
-	output logic [DATA_WIDTH-1:0] csr_src_addr,
-	output logic [DATA_WIDTH-1:0] csr_len 
+	output logic [DATA_WIDTH-1:0] csr_src_addr,// dma byte addr
+	output logic [DATA_WIDTH-1:0] csr_len, // dma word cnt
+
+	input wire [DATA_WIDTH-1:0] csr_result,
+	output wire csr_result_rd
 );
 	localparam int ADDR_LSB = $clog2(DATA_WIDTH)-3;
 	localparam int IDX_W = ADDR_WIDTH - ADDR_LSB;
@@ -48,6 +51,7 @@ module axi_lite_csr #(
 	localparam logic [IDX_W-1:0] IDX_STATUS = 1;// 0x04 RO
 	localparam logic [IDX_W-1:0] IDX_SRC_ADDR = 2;  // 0x08 RW
 	localparam logic [IDX_W-1:0] IDX_LEN = 3; // 0x0C RW
+	localparam logic [IDX_W-1:0] IDX_RESULT = 4; // 0x10 RO, pop-on-read
 
 	logic awskd_valid, wskd_valid, arskd_valid;
 	logic [IDX_W-1:0] awskd_addr, arskd_addr;
@@ -121,10 +125,11 @@ module axi_lite_csr #(
 		wr_src_addr = 1'b0;
 		wr_len = 1'b0;
 		
-		unique case (awskd_addr)
+		case (awskd_addr)
 			IDX_CTRL: wr_ctrl = axil_wr_ready;
 			IDX_SRC_ADDR: wr_src_addr = axil_wr_ready;
 			IDX_LEN: wr_len = axil_wr_ready;
+			default: ;
 		endcase
 	end
 
@@ -156,13 +161,17 @@ module axi_lite_csr #(
 	logic [31:0] axil_rdata_next;
 	always_comb begin
 		axil_rdata_next = '0;
-		unique case (arskd_addr)
+		case (arskd_addr)
 			IDX_CTRL: axil_rdata_next = csr_ctrl;
 			IDX_STATUS: axil_rdata_next = csr_status;
 			IDX_SRC_ADDR: axil_rdata_next = csr_src_addr;
 			IDX_LEN: axil_rdata_next = csr_len;
+			IDX_RESULT: axil_rdata_next = csr_result;
+			default: ;
 		endcase
 	end
+
+	assign csr_result_rd = axil_rd_ready && (arskd_addr == IDX_RESULT);
 
 	always_ff @(posedge aclk or negedge aresetn) begin
 		if (!aresetn) begin
