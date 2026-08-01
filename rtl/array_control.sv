@@ -102,7 +102,7 @@ module array_control #(
 		end
 	end
 
-	// address genrate - 8 continuous reads
+	// address generate 8 continuous reads
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			rd_ptr_r <= '0;
