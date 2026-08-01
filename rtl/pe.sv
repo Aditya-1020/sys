@@ -9,36 +9,31 @@ module pe #(
 	input wire clk,
 	input wire rstn,
 	input wire i_enable, // compute
-	input wire i_clear,// clear accumulator
 	input wire i_w_load,
 	input wire signed [DATA_WIDTH-1:0] i_a,
 	input wire signed [DATA_WIDTH-1:0] i_b,
 	input wire signed [ACC_WIDTH-1:0] i_psum,
 	output wire signed [DATA_WIDTH-1:0] o_a,
 	output wire signed [ACC_WIDTH-1:0] o_psum,
-	output wire o_enable,
-	output wire o_clear
+	output wire o_enable
 );
 	logic signed [DATA_WIDTH-1:0] a_r; // pass through only
 	always_ff @(posedge clk) begin
-		if (i_clear) begin
-			a_r <= '0;
-		end else if (i_enable) begin
+		if (i_enable) begin
 			a_r <= i_a;
 		end
 	end
 
-	logic en_r, clear_r;
+	logic en_r;
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			en_r <= 1'b0;
-			clear_r <= 1'b0;
 		end else begin
 			en_r <= i_enable;
-			clear_r <= i_clear;
 		end
 	end
 
+	// weight stationary (clear unless reloaded)
 	logic signed [DATA_WIDTH-1:0] w_r;
 	always_ff @(posedge clk) begin
 		if (i_w_load) begin
@@ -46,26 +41,22 @@ module pe #(
 		end
 	end
 
-	logic signed [2*DATA_WIDTH:0] mult_w;
+	logic signed [2*DATA_WIDTH-1:0] mult_w; // 16 bit
 	assign mult_w = a_r * w_r;
 
-	logic signed [2*DATA_WIDTH:0] mult_r;
+	logic signed [2*DATA_WIDTH-1:0] mult_r;
 	always_ff @(posedge clk) begin
-		if (i_clear) begin
-			mult_r <= '0;
-		end else if (i_enable) begin
+		if (i_enable) begin
 			mult_r <= mult_w;
 		end
 	end
 
 	logic signed [ACC_WIDTH-1:0] accumulator;
 	wire signed [ACC_WIDTH-1:0] next_acc;
-	assign next_acc = signed'(i_psum) + ACC_WIDTH'(mult_r);
+	assign next_acc = i_psum + ACC_WIDTH'(mult_r);
 
 	always_ff @(posedge clk) begin
-		if (i_clear) begin
-			accumulator <= '0;
-		end else if (i_enable) begin
+		if (i_enable) begin
 			accumulator <= next_acc;
 		end
 	end
@@ -73,7 +64,6 @@ module pe #(
 	assign o_psum = accumulator;
 	assign o_a = a_r;
 	assign o_enable = en_r;
-	assign o_clear = clear_r;
 
 endmodule
 `default_nettype wire
