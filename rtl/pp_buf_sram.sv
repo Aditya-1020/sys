@@ -3,8 +3,8 @@
 
 module pp_buf_sram (
 `ifdef USE_POWER_PINS
-	input wire vccd1,
-	input wire vssd1,
+	input wire vdd,
+	input wire vss,
 `endif
 	input wire clk,
 	input wire rstn,
@@ -43,8 +43,8 @@ module pp_buf_sram (
 
 	sram22_64x32m4w8 u_m0 (
 	`ifdef USE_POWER_PINS
-		.vdd(vccd1),
-		.vss(vssd1),
+		.vdd(vdd),
+		.vss(vss),
 	`endif
 		.clk(clk),
 		.rstb(rstn),
@@ -58,8 +58,8 @@ module pp_buf_sram (
 
 	sram22_64x32m4w8 u_m1 (
 	`ifdef USE_POWER_PINS
-		.vdd(vccd1),
-		.vss(vssd1),
+		.vdd(vdd),
+		.vss(vss),
 	`endif
 		.clk(clk),
 		.rstb(rstn),
