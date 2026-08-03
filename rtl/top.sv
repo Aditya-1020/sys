@@ -47,13 +47,35 @@ module top #(
 	input wire [1:0] i_m_axi_rresp,
 	input wire i_m_axi_rlast,
 	input wire i_m_axi_rvalid,
-	output wire o_m_axi_rready
+	output wire o_m_axi_rready,
+
+	// axi master write (result store)
+	output wire [3:0] o_m_axi_awid,
+	output wire [AXI_ADDR_W-1:0] o_m_axi_awaddr,
+	output wire [7:0] o_m_axi_awlen,
+	output wire [2:0] o_m_axi_awsize,
+	output wire [1:0] o_m_axi_awburst,
+	output wire o_m_axi_awlock,
+	output wire [3:0] o_m_axi_awcache,
+	output wire [2:0] o_m_axi_awprot,
+	output wire o_m_axi_awvalid,
+	input wire i_m_axi_awready,
+
+	output wire [AXI_DATA_W-1:0] o_m_axi_wdata,
+	output wire [3:0] o_m_axi_wstrb,
+	output wire o_m_axi_wlast,
+	output wire o_m_axi_wvalid,
+	input wire i_m_axi_wready,
+
+	input wire [1:0] i_m_axi_bresp,
+	input wire i_m_axi_bvalid,
+	output wire o_m_axi_bready
 );
 	localparam integer MATRIX_SIZE = 4;
 	localparam integer DATA_WIDTH = 8;
-	localparam integer ROW_W = MATRIX_SIZE*DATA_WIDTH; // 32
+	localparam integer ROW_W = MATRIX_SIZE * DATA_WIDTH; // 32
 	localparam integer LANE_W = $clog2(MATRIX_SIZE); // 2
-	localparam integer RESULT_W = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE); // 18
+	localparam integer RESULT_W = (2 * DATA_WIDTH) + $clog2(MATRIX_SIZE); // 18
 	localparam integer SRAM_ADDR_W = 6;
 	localparam integer LEN_W = SRAM_ADDR_W + 1;
 
@@ -61,6 +83,7 @@ module top #(
 	localparam integer CTRL_EN = 0; // array enable
 	localparam integer CTRL_GO = 1; // rising edge launches one dma job
 	localparam integer CTRL_LOAD_W = 2; // reload stationary weights this job
+	localparam integer CTRL_STORE = 3; // rising edge stores one c tile to dst
 
 	// STATUS bit map (0x04)
 	localparam integer ST_DMA_BUSY = 0;
@@ -74,6 +97,9 @@ module top #(
 	localparam integer ST_W_VALID = 8; // weights resident
 	localparam integer ST_RES_VALID = 9; // at least one result poppable
 	localparam integer ST_RES_OVF = 10;
+	localparam integer ST_WDMA_BUSY = 11;
+	localparam integer ST_WDMA_DONE = 12;
+	localparam integer ST_WDMA_ERR = 13; // bresp err
 	localparam integer ST_LEVEL_LSB = 16; // [21:16] fifo level
 
 	wire resetn_synced;
@@ -83,18 +109,21 @@ module top #(
 		.rstn_sync(resetn_synced)
 	);
 
-	wire [31:0] csr_ctrl, csr_src_addr, csr_len;
+	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr;
 	logic [31:0] csr_status;
 
-	logic go_r;
+	logic go_r, store_r;
 	always_ff @(posedge clk or negedge resetn_synced) begin
 		if (!resetn_synced) begin
 			go_r <= 1'b0;
+			store_r <= 1'b0;
 		end else begin
 			go_r <= csr_ctrl[CTRL_GO];
+			store_r <= csr_ctrl[CTRL_STORE];
 		end
 	end
 	wire dma_start = csr_ctrl[CTRL_GO] && !go_r;
+	wire wdma_start = csr_ctrl[CTRL_STORE] && !store_r;
 
 	wire dma_busy, dma_done, dma_err;
 	wire dma_fill_done, dma_swap;
@@ -117,13 +146,17 @@ module top #(
 	wire array_done, array_busy;
 
 	// result capture path
-	wire signed [RESULT_W-1:0] arr_result_data;
-	wire arr_result_valid;
+	wire [MATRIX_SIZE*RESULT_W-1:0] arr_result_data;
+	wire [MATRIX_SIZE-1:0] arr_result_valid;
 	wire fifo_room, fifo_valid, fifo_overflow, fifo_rd;
 	wire signed [RESULT_W-1:0] fifo_rdata;
 	wire [5:0] fifo_level;
 
 	wire [31:0] csr_result = {{(32-RESULT_W){fifo_rdata[RESULT_W-1]}}, fifo_rdata}; // extend csr readback
+
+	// result store dma
+	wire wdma_busy, wdma_done, wdma_err, wdma_fifo_rd, csr_result_rd;
+	assign fifo_rd = wdma_busy ? wdma_fifo_rd : csr_result_rd;
 
 	always_comb begin
 		csr_status = '0;
@@ -138,6 +171,9 @@ module top #(
 		csr_status[ST_W_VALID] = arr_ctrl_w_valid;
 		csr_status[ST_RES_VALID] = fifo_valid;
 		csr_status[ST_RES_OVF] = fifo_overflow;
+		csr_status[ST_WDMA_BUSY] = wdma_busy;
+		csr_status[ST_WDMA_DONE] = wdma_done;
+		csr_status[ST_WDMA_ERR] = wdma_err;
 		csr_status[ST_LEVEL_LSB +: 6] = fifo_level;
 	end
 
@@ -161,12 +197,48 @@ module top #(
 		.o_s_axil_rresp  (o_s_axil_rresp),
 		.o_s_axil_rvalid (o_s_axil_rvalid),
 		.i_s_axil_rready (i_s_axil_rready),
+		.i_fifo_valid    (fifo_valid),
 		.csr_status      (csr_status),
 		.csr_result      (csr_result),
-		.csr_result_rd   (fifo_rd),
+		.csr_result_rd   (csr_result_rd),
 		.csr_ctrl        (csr_ctrl),
 		.csr_src_addr    (csr_src_addr),
-		.csr_len         (csr_len)
+		.csr_len         (csr_len),
+		.csr_dst_addr    (csr_dst_addr)
+	);
+
+	axi4_dma_wr #(
+		.AXI_ADDR_W (AXI_ADDR_W),
+		.BEATS      (MATRIX_SIZE*MATRIX_SIZE)
+	) u_wdma (
+		.clk          (clk),
+		.rstn         (resetn_synced),
+		.i_dst_addr   (csr_dst_addr),
+		.i_start      (wdma_start),
+		.o_busy       (wdma_busy),
+		.o_done       (wdma_done),
+		.o_err        (wdma_err),
+		.o_m_awid     (o_m_axi_awid),
+		.o_m_awaddr   (o_m_axi_awaddr),
+		.o_m_awlen    (o_m_axi_awlen),
+		.o_m_awsize   (o_m_axi_awsize),
+		.o_m_awburst  (o_m_axi_awburst),
+		.o_m_awlock   (o_m_axi_awlock),
+		.o_m_awcache  (o_m_axi_awcache),
+		.o_m_awprot   (o_m_axi_awprot),
+		.o_m_awvalid  (o_m_axi_awvalid),
+		.i_m_awready  (i_m_axi_awready),
+		.o_m_wdata    (o_m_axi_wdata),
+		.o_m_wstrb    (o_m_axi_wstrb),
+		.o_m_wlast    (o_m_axi_wlast),
+		.o_m_wvalid   (o_m_axi_wvalid),
+		.i_m_wready   (i_m_axi_wready),
+		.i_m_bresp    (i_m_axi_bresp),
+		.i_m_bvalid   (i_m_axi_bvalid),
+		.o_m_bready   (o_m_axi_bready),
+		.i_fifo_valid (fifo_valid),
+		.i_fifo_rdata (csr_result),
+		.o_fifo_rd    (wdma_fifo_rd)
 	);
 
 	axi4_dma #(
@@ -234,7 +306,7 @@ module top #(
 		.rstn          (resetn_synced),
 		.i_enable      (csr_ctrl[CTRL_EN]),
 		.i_load_w      (csr_ctrl[CTRL_LOAD_W]),
-		.i_room        (fifo_room), // no room for un stay idle
+		.i_room        (fifo_room), // no room for run stay idle
 		.i_fill_done   (dma_fill_done),
 		.o_array_done  (array_release),
 		.o_cs_array    (arr_ctrl_cs_p1),

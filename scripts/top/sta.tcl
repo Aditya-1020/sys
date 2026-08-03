@@ -5,7 +5,7 @@ read_verilog build/top_synth.v
 link_design top
 read_sdc constraints/top.sdc
 
-set st_net [get_nets {u_accel.u_array.current_state[*]}]
+set st_net [get_nets {u_array.current_state[*]}]
 set st_ff  [get_cells -of_objects [get_pins -of_objects $st_net -filter {direction == output}]]
 
 # group_path -name in2reg  -from [all_inputs]

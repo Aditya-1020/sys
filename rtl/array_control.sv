@@ -129,11 +129,16 @@ module array_control #(
 		end
 	end
 
+	// logic [ROW_W-1:0] sram_rdata_s1, sram_rdata_s2;
+	// always_ff @(posedge clk) begin
+	// 	sram_rdata_s1 <= i_array_rdata;
+	// end
+
 	assign o_b_en = rd_vld_r && rd_isb_r;
 	assign o_b_lane = rd_lane_r;
 	assign o_b_wdata = i_array_rdata;
-	assign o_a_valid = rd_vld_r && !rd_isb_r;
 	assign o_ld_a = i_array_rdata;
+	assign o_a_valid = rd_vld_r && !rd_isb_r;
 	assign o_start = (current_state == START);
 
 	
