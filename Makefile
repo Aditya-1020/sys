@@ -47,7 +47,7 @@ export STA_SRAM_LIB
 
 STA_TOP ?= pe
 
-.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl sweep liblane lib-last_run report sta-shell
+.PHONY: all wave xcompile xelab xrun xgui synth gls sta lint clean sv2v_rtl sweep liblane lib-last_run report sta-shell cocotb
 
 all: xrun
 
@@ -91,6 +91,11 @@ gls: $(SYNTH_V) $(GLS_CELLS)
 	xelab -debug typical -top $(TOP) -snapshot $(GLS_SNAPSHOT)
 	xsim $(GLS_SNAPSHOT) -R
 
+PYTHON ?= .venv/bin/python
+
+cocotb: $(V_RTL)
+	$(PYTHON) $(TB_DIR)/run_top.py
+
 wave:
 	gtkwave dump.vcd &
 
@@ -127,3 +132,4 @@ sta-shell:
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) xsim.dir .Xil
 	rm -f dump.vcd *.pb *.log *.wdb *.jou *.str
+	rm -rf tb/__pycache__

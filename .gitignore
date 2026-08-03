@@ -34,7 +34,4 @@ notes/
 runs/
 macrofp.py
 no-sram/
-rtl_old_arch/
-# just some seperate constraints for the array itself for some prototyping
-constraints/systolic
-config_sys.json
+sram/
