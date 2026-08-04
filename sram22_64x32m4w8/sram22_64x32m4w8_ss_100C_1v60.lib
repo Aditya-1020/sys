@@ -1,4 +1,4 @@
-library (sram22_64x32m4w8) {
+library (sram22_64x32m4w8__ss_100C_1v60) {
   /* Models written by Liberate MX 23.1.3.126.isr3 from Cadence Design Systems, Inc. on Thu Nov 21 21:16:06 2024 */
   delay_model : table_lookup;
   comment : "";
