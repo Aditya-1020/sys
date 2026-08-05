@@ -25,7 +25,7 @@ module systolic_array #(
 	localparam integer ARRAY_ROWS = MATRIX_SIZE;
 	localparam integer ARRAY_COLS = MATRIX_SIZE;
 	localparam integer INNER_DIM = MATRIX_SIZE; // K MACs per column
-	localparam integer PE_LATENCY = 2;
+	localparam integer PE_LATENCY = 3;
 	localparam integer FEED_SKEW = 1; // k = feed skew + r + j
 	localparam integer DRAIN_BASE = FEED_SKEW + ARRAY_ROWS + PE_LATENCY; // output
 	localparam integer DRAIN_LAST = DRAIN_BASE + (ARRAY_COLS-1) + (ARRAY_ROWS-1);
@@ -132,10 +132,13 @@ module systolic_array #(
 		end else begin
 			a_valid_r <= i_a_valid;
 			b_en_r <= i_b_en;
-			b_lane_r <= i_b_lane;
-			b_wdata_r <= i_b_wdata;
-			load_a <= i_ld_a;
 		end
+	end
+
+	always_ff @(posedge clk) begin
+		b_lane_r <= i_b_lane;
+		b_wdata_r <= i_b_wdata;
+		load_a <= i_ld_a;
 	end
 
 	wire [ARRAY_ROWS-1:0] pe_w_load;
