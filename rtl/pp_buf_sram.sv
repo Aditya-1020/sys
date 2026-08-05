@@ -2,10 +2,6 @@
 `timescale 1ps/1ps
 
 module pp_buf_sram (
-`ifdef USE_POWER_PINS
-	input wire vdd,
-	input wire vss,
-`endif
 	input wire clk,
 	input wire rstn,
 	input wire i_swap, // pulse to swap buffers
@@ -54,10 +50,10 @@ module pp_buf_sram (
 	wire [5:0] m1_addr = m0_dma ? i_addr_array : i_dma_addr;
 
 	sram22_64x32m4w8 u_m0 (
-	`ifdef USE_POWER_PINS
-		.vdd(vdd),
-		.vss(vss),
-	`endif
+	// `ifdef USE_POWER_PINS
+	// 	.vdd(vdd),
+	// 	.vss(vss),
+	// `endif
 		.clk(clk),
 		.rstb(sram_rstb),
 		.ce(m0_ce),
@@ -69,10 +65,10 @@ module pp_buf_sram (
 	);
 
 	sram22_64x32m4w8 u_m1 (
-	`ifdef USE_POWER_PINS
-		.vdd(vdd),
-		.vss(vss),
-	`endif
+	// `ifdef USE_POWER_PINS
+	// 	.vdd(vdd),
+	// 	.vss(vss),
+	// `endif
 		.clk(clk),
 		.rstb(sram_rstb),
 		.ce(m1_ce),

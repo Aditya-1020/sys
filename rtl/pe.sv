@@ -41,9 +41,6 @@ module pe #(
 		end
 	end
 
-	// logic signed [2*DATA_WIDTH-1:0] mult_w; // 16 bit
-	// assign mult_w = a_r * w_r;
-
 	logic signed [2*DATA_WIDTH-1:0] mult_pipe;
 	always_ff @(posedge clk) begin
 		mult_pipe <= a_r * w_r;
