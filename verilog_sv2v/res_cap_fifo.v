@@ -12,6 +12,7 @@ module res_cap_fifo (
 	o_level,
 	o_overflow
 );
+	reg _sv2v_0;
 	parameter integer MATRIX_SIZE = 4;
 	parameter integer DATA_WIDTH = 8;
 	localparam integer JOBS = 2;
@@ -82,7 +83,6 @@ module res_cap_fifo (
 	wire row_valid = &row_valid_v;
 	reg [ROW_W - 1:0] mem [0:ROWS - 1];
 	reg [PTR_W - 1:0] wr_ptr;
-	reg [PTR_W - 1:0] rd_ptr;
 	reg [RLVL_W - 1:0] level_r;
 	function automatic signed [RLVL_W - 1:0] sv2v_cast_3EDEB_signed;
 		input reg signed [RLVL_W - 1:0] inp;
@@ -113,9 +113,26 @@ module res_cap_fifo (
 			row_buf_valid_r <= 1'b0;
 		else if (!row_buf_valid_r && !empty)
 			row_buf_valid_r <= 1'b1;
+	reg [ROWS - 1:0] rd_sel_r;
+	always @(posedge clk or negedge rstn)
+		if (!rstn)
+			rd_sel_r <= {{ROWS - 1 {1'b0}}, 1'b1};
+		else if (pop_row)
+			rd_sel_r <= {rd_sel_r[ROWS - 2:0], rd_sel_r[ROWS - 1]};
+	reg [ROW_W - 1:0] mem_rd;
+	always @(*) begin
+		if (_sv2v_0)
+			;
+		mem_rd = 1'sb0;
+		begin : sv2v_autoblock_4
+			reg signed [31:0] r;
+			for (r = 0; r < ROWS; r = r + 1)
+				mem_rd = mem_rd | ({ROW_W {rd_sel_r[r]}} & mem[r]);
+		end
+	end
 	always @(posedge clk)
 		if (!row_buf_valid_r && !empty)
-			row_buf_r <= mem[rd_ptr];
+			row_buf_r <= mem_rd;
 	always @(posedge clk or negedge rstn)
 		if (!rstn) begin
 			head_valid_r <= 1'b0;
@@ -140,11 +157,6 @@ module res_cap_fifo (
 			mem[wr_ptr] <= row_data;
 	always @(posedge clk or negedge rstn)
 		if (!rstn)
-			rd_ptr <= 1'sb0;
-		else if (pop_row)
-			rd_ptr <= rd_ptr + 1'b1;
-	always @(posedge clk or negedge rstn)
-		if (!rstn)
 			level_r <= 1'sb0;
 		else if (push && !pop_row)
 			level_r <= level_r + 1'b1;
@@ -165,5 +177,6 @@ module res_cap_fifo (
 	endfunction
 	assign o_level = sv2v_cast_54142({level_r, {COL_W {1'b0}}});
 	assign o_overflow = overflow_r;
+	initial _sv2v_0 = 0;
 endmodule
 `default_nettype wire

@@ -35,16 +35,24 @@ module pp_buf_sram (
 		else if (i_swap)
 			ping_pong_sel_r <= ~ping_pong_sel_r;
 	assign o_ping_pong_sel = ping_pong_sel_r;
+	reg [1:0] sram_rst_rel_r;
+	always @(posedge clk or negedge rstn)
+		if (!rstn)
+			sram_rst_rel_r <= 2'b00;
+		else
+			sram_rst_rel_r <= {sram_rst_rel_r[0], 1'b1};
+	wire sram_rstb = sram_rst_rel_r[0];
+	wire sram_access_en = sram_rst_rel_r[1];
 	wire m0_dma = ping_pong_sel_r == 1'b0;
-	wire m0_ce = (m0_dma ? i_dma_cs : i_cs_array);
+	wire m0_ce = sram_access_en && (m0_dma ? i_dma_cs : i_cs_array);
 	wire m0_we = (m0_dma ? i_dma_we : 1'b0);
 	wire [5:0] m0_addr = (m0_dma ? i_dma_addr : i_addr_array);
-	wire m1_ce = (m0_dma ? i_cs_array : i_dma_cs);
+	wire m1_ce = sram_access_en && (m0_dma ? i_cs_array : i_dma_cs);
 	wire m1_we = (m0_dma ? 1'b0 : i_dma_we);
 	wire [5:0] m1_addr = (m0_dma ? i_addr_array : i_dma_addr);
 	sram22_64x32m4w8 u_m0(
 		.clk(clk),
-		.rstb(rstn),
+		.rstb(sram_rstb),
 		.ce(m0_ce),
 		.we(m0_we),
 		.wmask(i_dma_mask),
@@ -54,7 +62,7 @@ module pp_buf_sram (
 	);
 	sram22_64x32m4w8 u_m1(
 		.clk(clk),
-		.rstb(rstn),
+		.rstb(sram_rstb),
 		.ce(m1_ce),
 		.we(m1_we),
 		.wmask(i_dma_mask),
