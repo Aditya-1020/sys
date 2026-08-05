@@ -77,7 +77,7 @@ module res_cap_fifo #(
 	wire row_valid = &row_valid_v;
 
 	logic [ROW_W-1:0] mem [0:ROWS-1];
-	logic [PTR_W-1:0] wr_ptr, rd_ptr;
+	logic [PTR_W-1:0] wr_ptr;
 	logic [RLVL_W-1:0] level_r;
 
 	wire full = (level_r == RLVL_W'(ROWS));
@@ -111,9 +111,26 @@ module res_cap_fifo #(
 		end
 	end
 
+	logic [ROWS-1:0] rd_sel_r;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			rd_sel_r <= {{(ROWS-1){1'b0}}, 1'b1};
+		end else if (pop_row) begin
+			rd_sel_r <= {rd_sel_r[ROWS-2:0], rd_sel_r[ROWS-1]};
+		end
+	end
+
+	logic [ROW_W-1:0] mem_rd;
+	always_comb begin
+		mem_rd = '0;
+		for (int r = 0; r < ROWS; r++) begin
+			mem_rd |= {ROW_W{rd_sel_r[r]}} & mem[r];
+		end
+	end
+
 	always_ff @(posedge clk) begin
 		if (!row_buf_valid_r && !empty) begin
-			row_buf_r <= mem[rd_ptr];
+			row_buf_r <= mem_rd;
 		end
 	end
 
@@ -147,14 +164,6 @@ module res_cap_fifo #(
 	always_ff @(posedge clk) begin
 		if (push) begin
 			mem[wr_ptr] <= row_data;
-		end
-	end
-
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			rd_ptr <= '0;
-		end else if (pop_row) begin
-			rd_ptr <= rd_ptr + 1'b1;
 		end
 	end
 

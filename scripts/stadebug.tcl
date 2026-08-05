@@ -1,9 +1,3 @@
-# stadebug.tcl — bootstrap for an interactive STA session.
-# Mirrors the setup preamble of librelane/scripts/openroad/sta/corner.tcl
-# (everything before the canned report dump), then defines a few helper
-# commands and hands over the prompt. Launched by scripts/stadebug, which
-# reconstructs the environment this expects.
-
 source $::env(SCRIPTS_DIR)/openroad/common/io.tcl
 
 set_cmd_units\
@@ -40,9 +34,7 @@ foreach {corner_name corner_object} [lln::get_corner_dict] {
     break
 }
 
-# ---------------------------------------------------------------------------
-# helper commands (thin wrappers over report_checks and friends)
-# ---------------------------------------------------------------------------
+
 set ::_fields {slew cap input net fanout}
 
 proc worst {{n 5}} {
@@ -60,20 +52,45 @@ proc slacks {} {
     report_tns
 }
 proc to {pin {n 1}} {
-    # paths ending at a pin/register, e.g.:  to _20104_/D
     report_checks -to $pin -group_path_count $n -fields $::_fields
 }
 proc from {pin {n 1}} {
-    # paths starting at a pin/register, e.g.:  from _20522_/Q
     report_checks -from $pin -group_path_count $n -fields $::_fields
 }
 proc between {a b} {
-    # path between two points, e.g.:  between _20522_/Q _20104_/D
     report_checks -from $a -to $b -fields $::_fields
 }
 proc viol {} {
-    # slew / cap / fanout violators
     report_check_types -violators -max_slew -max_capacitance -max_fanout
+}
+proc _violating_paths {delay} {
+    set rows {}
+    foreach path [find_timing_paths -path_delay $delay -sort_by_slack \
+                      -unique_paths_to_endpoint -group_path_count 999999 -slack_max 0] {
+        lappend rows [list [get_property $path slack] \
+                           [get_property [get_property $path startpoint] full_name] \
+                           [get_property [get_property $path endpoint] full_name]]
+    }
+    return [lsort -real -index 0 $rows]
+}
+proc vpaths {{n 20} {delay max}} {
+    set rows [_violating_paths $delay]
+    puts [format "%-14s %-26s %10s" Startpoint Endpoint Slack]
+    foreach row [lrange $rows 0 [expr {$n - 1}]] {
+        lassign $row slack start end
+        puts [format "%-14s %-26s %10.4f" $start $end $slack]
+    }
+    puts "[llength $rows] violating paths ($delay)"
+}
+proc offenders {{n 20} {delay max}} {
+    # violating endpoints tallied by startpoint, worst count first
+    set tally [dict create]
+    foreach row [_violating_paths $delay] { dict incr tally [lindex $row 1] }
+    set rows {}
+    dict for {start count} $tally { lappend rows [list $count $start] }
+    foreach row [lrange [lsort -integer -index 0 -decreasing $rows] 0 [expr {$n - 1}]] {
+        puts [format "%6dx  %s" {*}$row]
+    }
 }
 proc clk_info {} {
     report_clock_properties
@@ -84,6 +101,7 @@ proc cheat {} {
 ── helpers ─────────────────────────────────────────────────────────────
   slacks              WNS setup/hold + TNS               worst ?n?     n worst setup paths
   worst_hold ?n?      n worst hold paths                 viol          slew/cap/fanout violators
+  vpaths ?n? ?max|min?    violator table, worst first    offenders ?n?   startpoints by vio count
   to <pin> ?n?        paths ending at pin                from <pin> ?n?  paths starting at pin
   between <a> <b>     path a -> b                        clk_info      clocks + skew
   cheat               show this again

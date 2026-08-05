@@ -29,7 +29,7 @@ __pycache__/
 .*.swp
 .vscode/
 
-# verilog_sv2v/
+verilog_sv2v/
 notes/
 runs/
 macrofp.py
