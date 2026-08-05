@@ -15,7 +15,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
   default_inout_pin_cap : 0.005;
   default_input_pin_cap : 0.005;
   default_leakage_power_density : 0;
-  default_max_transition : 0.04;
+  default_max_transition : 1.5;
   default_output_pin_cap : 0;
   in_place_swap_mode : match_footprint;
   input_threshold_pct_fall : 50;
@@ -136,7 +136,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (addr[5]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00401157;
         rise_capacitance : 0.00401157;
         rise_capacitance_range (0.00379419, 0.00401157);
@@ -146,7 +146,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (addr[4]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00401157;
         rise_capacitance : 0.00401157;
         rise_capacitance_range (0.00379419, 0.00401157);
@@ -156,7 +156,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (addr[3]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00401157;
         rise_capacitance : 0.00401157;
         rise_capacitance_range (0.00379419, 0.00401157);
@@ -166,7 +166,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (addr[2]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00401157;
         rise_capacitance : 0.00401157;
         rise_capacitance_range (0.00379419, 0.00401157);
@@ -176,7 +176,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (addr[1]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00401157;
         rise_capacitance : 0.00401157;
         rise_capacitance_range (0.00379419, 0.00401157);
@@ -186,7 +186,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (addr[0]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00401157;
         rise_capacitance : 0.00401157;
         rise_capacitance_range (0.00379419, 0.00401157);
@@ -260,7 +260,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       direction : input;
       related_ground_pin : vss;
       related_power_pin : vdd;
-      max_transition : 0.351;
+      max_transition : 1.5;
       capacitance : 0.00383152;
       rise_capacitance : 0.00383152;
       rise_capacitance_range (0.003614, 0.00383152);
@@ -334,7 +334,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       direction : input;
       related_ground_pin : vss;
       related_power_pin : vdd;
-      max_transition : 0.351;
+      max_transition : 1.5;
       capacitance : 0.214174;
       rise_capacitance : 0.214174;
       rise_capacitance_range (0.0606355, 0.214174);
@@ -507,7 +507,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[31]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0114353;
         rise_capacitance : 0.0114353;
         rise_capacitance_range (0.0110602, 0.0114353);
@@ -517,7 +517,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[30]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -527,7 +527,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[29]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -537,7 +537,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[28]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -547,7 +547,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[27]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -557,7 +557,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[26]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -567,7 +567,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[25]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -577,7 +577,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[24]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -587,7 +587,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[23]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -597,7 +597,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[22]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -607,7 +607,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[21]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -617,7 +617,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[20]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -627,7 +627,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[19]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -637,7 +637,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[18]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -647,7 +647,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[17]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -657,7 +657,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[16]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -667,7 +667,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[15]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -677,7 +677,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[14]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -687,7 +687,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[13]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -697,7 +697,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[12]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -707,7 +707,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[11]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -717,7 +717,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[10]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -727,7 +727,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[9]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -737,7 +737,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[8]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -747,7 +747,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[7]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -757,7 +757,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[6]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -767,7 +767,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[5]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -777,7 +777,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[4]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -787,7 +787,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[3]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -797,7 +797,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[2]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -807,7 +807,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[1]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -817,7 +817,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (din[0]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.0129363;
         rise_capacitance : 0.0129363;
         rise_capacitance_range (0.0126434, 0.0129363);
@@ -1198,7 +1198,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       direction : input;
       related_ground_pin : vss;
       related_power_pin : vdd;
-      max_transition : 0.351;
+      max_transition : 1.5;
       capacitance : 0.30713;
       rise_capacitance : 0.30713;
       rise_capacitance_range (0.0727936, 0.30713);
@@ -1225,13 +1225,13 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
           index_1 ("0.002, 0.008, 0.03, 0.073, 0.138, 0.231, 0.351");
           index_2 ("0.002, 0.008, 0.03, 0.073, 0.138, 0.231, 0.351");
           values ( \
-            "7.8133, 7.81372, 7.81981, 7.83121, 7.84703, 7.86436, 7.88128", \
-            "7.81277, 7.81319, 7.81929, 7.83069, 7.84651, 7.86383, 7.88075", \
-            "7.80784, 7.80826, 7.81435, 7.82576, 7.84158, 7.8589, 7.87582", \
-            "7.7964, 7.79682, 7.80292, 7.81432, 7.83014, 7.84746, 7.86438", \
-            "7.78559, 7.78601, 7.7921, 7.8035, 7.81932, 7.83664, 7.85357", \
-            "7.77487, 7.77529, 7.78138, 7.79279, 7.8086, 7.82593, 7.84285", \
-            "7.76645, 7.76687, 7.77297, 7.78437, 7.80019, 7.81751, 7.83443" \
+            "0.131171, 0.131619, 0.136067, 0.147664, 0.166359, 0.190358, 0.215414", \
+            "0.131171, 0.131618, 0.136067, 0.147663, 0.166358, 0.190357, 0.215414", \
+            "0.131172, 0.13162, 0.136068, 0.147664, 0.166359, 0.190359, 0.215415", \
+            "0.131175, 0.131623, 0.136071, 0.147668, 0.166363, 0.190362, 0.215418", \
+            "0.131168, 0.131616, 0.136064, 0.147661, 0.166356, 0.190355, 0.215411", \
+            "0.131174, 0.131622, 0.13607, 0.147667, 0.166362, 0.190361, 0.215417", \
+            "0.131168, 0.131616, 0.136065, 0.147661, 0.166356, 0.190355, 0.215411" \
           );
         }
       }
@@ -1271,7 +1271,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       direction : input;
       related_ground_pin : vss;
       related_power_pin : vdd;
-      max_transition : 0.351;
+      max_transition : 1.5;
       capacitance : 0.00400577;
       rise_capacitance : 0.00400577;
       rise_capacitance_range (0.00378827, 0.00400577);
@@ -1346,7 +1346,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (wmask[3]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00545853;
         rise_capacitance : 0.00545853;
         rise_capacitance_range (0.00522588, 0.00545853);
@@ -1356,7 +1356,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (wmask[2]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00545853;
         rise_capacitance : 0.00545853;
         rise_capacitance_range (0.00522588, 0.00545853);
@@ -1366,7 +1366,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (wmask[1]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00545853;
         rise_capacitance : 0.00545853;
         rise_capacitance_range (0.00522588, 0.00545853);
@@ -1376,7 +1376,7 @@ library (sram22_64x32m4w8__ss_100C_1v60) {
       pin (wmask[0]) {
         related_ground_pin : vss;
         related_power_pin : vdd;
-        max_transition : 0.351;
+        max_transition : 1.5;
         capacitance : 0.00545853;
         rise_capacitance : 0.00545853;
         rise_capacitance_range (0.00522588, 0.00545853);
