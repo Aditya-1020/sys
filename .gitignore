@@ -35,3 +35,5 @@ runs/
 macrofp.py
 no-sram/
 sram/
+
+scripts/patch_*
