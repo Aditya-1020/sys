@@ -5,10 +5,6 @@ module top #(
 	parameter integer AXI_ADDR_W = 32,
 	parameter integer AXI_DATA_W = 32
 )(
-	`ifdef USE_POWER_PINS
-		inout vdd,
-		inout vss,
-	`endif
 	input wire clk,
 	input wire rstn,
 
@@ -84,7 +80,8 @@ module top #(
 	localparam integer CTRL_GO = 1; // rising edge launches one dma job
 	localparam integer CTRL_LOAD_W = 2; // reload stationary weights this job
 	localparam integer CTRL_STORE = 3; // rising edge stores one c tile to dst
-	localparam integer CTRL_AUTO_ST = 4; // hw self-launches a store per completed tile
+	localparam integer CTRL_AUTO_ST = 4; // self launch store per completed tile
+	localparam integer CTRL_AUTO_FILL = 5; // self launch fill per freed buffer
 
 	// STATUS bit map (0x04)
 	localparam integer ST_DMA_BUSY = 0;
@@ -101,6 +98,7 @@ module top #(
 	localparam integer ST_WDMA_BUSY = 11;
 	localparam integer ST_WDMA_DONE = 12;
 	localparam integer ST_WDMA_ERR = 13; // bresp err
+	localparam integer ST_AF_BUSY = 14; // auto fill busy
 	localparam integer ST_LEVEL_LSB = 16; // [21:16] fifo level
 	localparam integer ST_TILE_LSB = 22;
 
@@ -111,25 +109,29 @@ module top #(
 		.rstn_sync(resetn_synced)
 	);
 
-	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr;
+	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr, csr_njobs;
 	logic [31:0] csr_status;
 
-	logic go_r, store_r, auto_st_r;
+	logic go_r, store_r, auto_st_r, auto_fill_r;
 	always_ff @(posedge clk or negedge resetn_synced) begin
 		if (!resetn_synced) begin
 			go_r <= 1'b0;
 			store_r <= 1'b0;
 			auto_st_r <= 1'b0;
+			auto_fill_r <= 1'b0;
 		end else begin
 			go_r <= csr_ctrl[CTRL_GO];
 			store_r <= csr_ctrl[CTRL_STORE];
 			auto_st_r <= csr_ctrl[CTRL_AUTO_ST];
+			auto_fill_r <= csr_ctrl[CTRL_AUTO_FILL];
 		end
 	end
-	wire dma_start = csr_ctrl[CTRL_GO] && !go_r;
+	wire dma_start_manual = csr_ctrl[CTRL_GO] && !go_r;
 	wire wdma_start_manual = csr_ctrl[CTRL_STORE] && !store_r;
 	wire auto_st_en = csr_ctrl[CTRL_AUTO_ST];
-	wire auto_st_arm = auto_st_en && !auto_st_r; // enable rising edge reloads the pointer
+	wire auto_st_arm = auto_st_en && !auto_st_r; // rising edge reloads
+	wire auto_fill_en = csr_ctrl[CTRL_AUTO_FILL];
+	wire auto_fill_arm = auto_fill_en && !auto_fill_r;
 
 	wire dma_busy, dma_done, dma_err;
 	wire dma_fill_done, dma_swap;
@@ -217,6 +219,7 @@ module top #(
 		csr_status[ST_WDMA_BUSY] = wdma_busy;
 		csr_status[ST_WDMA_DONE] = wdma_done;
 		csr_status[ST_WDMA_ERR] = wdma_err;
+		csr_status[ST_AF_BUSY] = auto_fill_pend;
 		csr_status[ST_LEVEL_LSB +: 6] = fifo_level;
 		csr_status[ST_TILE_LSB +: 4] = tile_cnt_r;
 	end
@@ -248,7 +251,8 @@ module top #(
 		.csr_ctrl        (csr_ctrl),
 		.csr_src_addr    (csr_src_addr),
 		.csr_len         (csr_len),
-		.csr_dst_addr    (csr_dst_addr)
+		.csr_dst_addr    (csr_dst_addr),
+		.csr_njobs       (csr_njobs)
 	);
 
 	axi4_dma_wr #(
@@ -291,7 +295,7 @@ module top #(
 	 ) u_dma (
 		.clk         (clk),
 		.rstn        (resetn_synced),
-		.i_src_addr  (csr_src_addr),
+		.i_src_addr  (dma_src),
 		.i_len       (csr_len[LEN_W-1:0]), // 1-128 safe accesss (>128 wraps wrptr)
 		.i_start     (dma_start),
 		.o_busy      (dma_busy),
@@ -323,10 +327,6 @@ module top #(
 	);
 
 	pp_buf_sram u_sram (
-		`ifdef USE_POWER_PINS
-		.vdd			(vdd),
-		.vss			(vss),
-		`endif
 		.clk            (clk),
 		.rstn           (resetn_synced),
 		.i_swap         (dma_swap),
