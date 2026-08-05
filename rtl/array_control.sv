@@ -125,14 +125,11 @@ module array_control #(
 		end else begin
 			rd_vld_r <= o_cs_array;
 			rd_isb_r <= load_w_r && (rd_ptr_r < unsigned'(PTR_W'(MATRIX_SIZE)));
-			rd_lane_r <= rd_ptr_r[LANE_W-1:0];
 		end
 	end
-
-	// logic [ROW_W-1:0] sram_rdata_s1, sram_rdata_s2;
-	// always_ff @(posedge clk) begin
-	// 	sram_rdata_s1 <= i_array_rdata;
-	// end
+	always_ff @(posedge clk) begin
+		rd_lane_r <= rd_ptr_r[LANE_W-1:0];
+	end
 
 	assign o_b_en = rd_vld_r && rd_isb_r;
 	assign o_b_lane = rd_lane_r;
@@ -141,20 +138,7 @@ module array_control #(
 	assign o_a_valid = rd_vld_r && !rd_isb_r;
 	assign o_start = (current_state == START);
 
-	
-	// release buffer
-	logic release_r;
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			release_r <= 1'b1;
-		end else if (start_job) begin
-			release_r <= 1'b0; // swap cycle
-		end else if (job_end) begin
-			release_r <= 1'b1; // allow dma swap
-		end
-	end
-
-	assign o_array_done = release_r;
+	assign o_array_done = (current_state == IDLE) && i_enable && i_room;
 	assign o_busy = (current_state != IDLE);
 
 endmodule
