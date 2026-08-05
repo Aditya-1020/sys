@@ -28,9 +28,13 @@ SYNTH_TOP ?= systolic_array
 SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
 STA_TOP ?= pe
 
-.PHONY: all cocotb sv2v_rtl synth sta sta-shell lint sram-lib liblane lib-last_run report clean
+.PHONY: all cocotb vectors xrun sim-sv waves sv2v_rtl synth sta sta-shell lint sram-lib liblane lib-last_run report clean
 
 all: cocotb
+
+VECTORS = $(TB_DIR)/vectors/stim.hex $(TB_DIR)/vectors/golden.hex
+TB_SV = $(TB_DIR)/tb_top.sv
+COCOTB_PRELOAD ?= $(firstword $(wildcard /usr/lib/x86_64-linux-gnu/libexpat.so.1))
 
 $(VERILOG_SV2V) $(BUILD_DIR):
 	@mkdir -p $@
@@ -44,7 +48,24 @@ $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
 sv2v_rtl: $(V_RTL)
 
 cocotb: $(V_RTL)
-	$(PYTHON) $(TB_DIR)/run_top.py
+	LD_PRELOAD=$(COCOTB_PRELOAD) $(PYTHON) $(TB_DIR)/test_top.py
+
+$(VECTORS) &: $(TB_DIR)/test_top.py
+	$(PYTHON) $(TB_DIR)/test_top.py --gen
+
+vectors: $(VECTORS)
+
+xrun: $(VECTORS) $(TB_SV) $(SV_RTL) $(V_MODELS) | $(BUILD_DIR)
+	xrun -64bit -sv -timescale 1ps/1ps -access +rwc \
+		-l $(BUILD_DIR)/xrun.log $(SV_RTL) $(V_MODELS) $(TB_SV)
+
+sim-sv: $(VECTORS) $(TB_SV) $(V_RTL) | $(BUILD_DIR)
+	iverilog -g2012 -s tb_top -o $(BUILD_DIR)/tb_top.vvp \
+		$(V_RTL) $(RTL_DIR)/sram22_64x32m4w8.v $(TB_SV)
+	vvp $(BUILD_DIR)/tb_top.vvp
+
+waves:
+	gtkwave $(BUILD_DIR)/tb_top.vcd &
 
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(addprefix -v ,$(V_MODELS))
@@ -93,5 +114,5 @@ report:
 	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)
 
 clean:
-	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) tb/__pycache__
+	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) tb/__pycache__ tb/*.xml
 	rm -f *.log
