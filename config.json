@@ -21,7 +21,7 @@
 	"SYNTH_CORNER": "nom_ss_100C_1v60",
 	"PNR_CORNERS": ["nom_ss_100C_1v60"],
 	"DEFAULT_CORNER": "nom_ss_100C_1v60",
-	"RSZ_CORNERS": ["nom_ss_100C_1v60", "nom_ff_n40C_1v95"],
+	"RSZ_CORNERS": ["max_ss_100C_1v60", "nom_ss_100C_1v60", "min_ss_100C_1v60", "nom_ff_n40C_1v95"],
 	"CTS_CORNERS": ["nom_ss_100C_1v60", "nom_ff_n40C_1v95"],
 
 	"GRT_ALLOW_CONGESTION": true,
@@ -29,18 +29,19 @@
 	"RUN_ANTENNA_REPAIR": false,
 
 	"CTS_SINK_CLUSTERING_SIZE": 32,
-	"CTS_ROOT_BUFFER": "sky130_fd_sc_hd__clkbuf_8",
-	"CTS_CLK_BUFFERS": [ 
-		"sky130_fd_sc_hd__clkbuf_2", 
-		"sky130_fd_sc_hd__clkbuf_4", 
-		"sky130_fd_sc_hd__clkbuf_8"
+	"CTS_ROOT_BUFFER": "sky130_fd_sc_hd__clkbuf_16",
+	"CTS_CLK_BUFFERS": [
+		"sky130_fd_sc_hd__clkbuf_2",
+		"sky130_fd_sc_hd__clkbuf_4",
+		"sky130_fd_sc_hd__clkbuf_8",
+		"sky130_fd_sc_hd__clkbuf_16"
 	],
 
 	"RUN_POST_GRT_DESIGN_REPAIR": true,
-	"RUN_POST_GRT_RESIZER_TIMING": false,
+	"RUN_POST_GRT_RESIZER_TIMING": true,
 
 	"PL_RESIZER_SETUP_SLACK_MARGIN": 0.3,
-	"GRT_RESIZER_SETUP_SLACK_MARGIN": 0.2,
+	"GRT_RESIZER_SETUP_SLACK_MARGIN": 0.35,
 
 	"RUN_KLAYOUT_XOR": false,
 

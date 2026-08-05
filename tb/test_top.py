@@ -15,11 +15,14 @@ EN= 1 << 0
 GO = 1<< 1
 LOAD_W = 1 << 2
 STORE = 1 << 3
+AUTO_ST = 1 << 4
+DMA_BUSY = 1 << 0
 DMA_ERR = 1 << 2
 RES_OVF = 1 << 10
 WDMA_DONE = 1 << 12
 WDMA_ERR = 1 << 13
 LEVEL_LSB = 16
+TILE_LSB = 22
 
 N = 4
 RESULT_BITS = 18
@@ -169,8 +172,8 @@ async def setup(dut):
 	BENCH_T0 = cycles()
 
 
-async def program_job(dut, words, load_w, src=0x1000):
-	ctrl = EN | (LOAD_W if load_w else 0)
+async def program_job(dut, words, load_w, src=0x1000, extra=0):
+	ctrl = EN | (LOAD_W if load_w else 0) | extra
 	await csr_write(dut, SRC, src)
 	await csr_write(dut, LEN, words)
 	await csr_write(dut, CTRL, ctrl)
@@ -238,6 +241,56 @@ async def store_results(dut, dst=0x2000, ctrl=EN | GO, timeout=500):
 	return np.array(vals, dtype=np.int32).reshape(N, N)
 
 
+async def wait_dma_idle(dut, timeout=500):
+	for _ in range(timeout):
+		status = await csr_read(dut, STATUS)
+		assert not status & DMA_ERR, f"dma error, STATUS=0x{status:08x}"
+		if not (status & DMA_BUSY):
+			return
+		await RisingEdge(dut.clk)
+	raise TimeoutError("dma never went idle")
+
+
+async def bench_pipeline(dut, a, b, njobs, dst, auto):
+	WMEM.clear()
+	await csr_write(dut, DST, dst)
+	if auto:
+		await csr_write(dut, CTRL, EN | AUTO_ST)  # arm: reloads dst pointer, zeroes tile count
+	extra = AUTO_ST if auto else 0
+
+	t0 = cycles()
+	for j in range(njobs):
+		await wait_dma_idle(dut)
+		MEM[:] = (pack(b) + pack(a)) if j == 0 else pack(a)
+		await program_job(dut, words=8 if j == 0 else 4, load_w=(j == 0), extra=extra)
+		if not auto:
+			await wait_result(dut)
+			await csr_write(dut, DST, dst + j * N * N * 4)
+			await csr_write(dut, CTRL, EN | STORE)
+			await csr_write(dut, CTRL, EN)
+
+	for _ in range(4000):
+		status = await csr_read(dut, STATUS)
+		assert not status & WDMA_ERR, f"store error, STATUS=0x{status:08x}"
+		assert not status & RES_OVF, f"result fifo overflow, STATUS=0x{status:08x}"
+		if auto and ((status >> TILE_LSB) & 0xF) == njobs % 16:
+			break
+		if not auto and (status & WDMA_DONE):
+			break
+		await RisingEdge(dut.clk)
+	else:
+		raise TimeoutError(f"pipeline stalled, STATUS=0x{status:08x}")
+	total = cycles() - t0
+
+	exp = a.astype(np.int32) @ b.astype(np.int32)
+	for t in range(njobs):
+		base = dst + t * N * N * 4
+		vals = [sign_extend_result(WMEM[base + 4 * i]) for i in range(N * N)]
+		got = np.array(vals, dtype=np.int32).reshape(N, N)
+		assert (got == exp).all(), f"tile {t}\ngot\n{got}\nexp\n{exp}"
+	return total
+
+
 async def bench_job(dut, name, words, load_w, src=0x1000, reader=read_results):
 	t0 = cycles()
 	await program_job(dut, words, load_w, src)
@@ -301,3 +354,12 @@ async def test_matmul(dut):
 	assert (got == ref(a2)).all(), f"\ngot\n{got}\nexp\n{ref(a2)}"
 
 	bench_report(dut)
+
+	K = 8
+	ser = await bench_pipeline(dut, a2, b, njobs=K, dst=0x3000, auto=False)
+	aut = await bench_pipeline(dut, a2, b, njobs=K, dst=0x4000, auto=True)
+	dut._log.info(
+		f"\npipeline, {K} jobs back-to-back\n"
+		f"  cpu-sequenced store  {ser:.0f} cycles  ({ser/K:.1f}/job, {MACS_PER_JOB*K/ser:.2f} MAC/cyc)\n"
+		f"  hw auto-chained      {aut:.0f} cycles  ({aut/K:.1f}/job, {MACS_PER_JOB*K/aut:.2f} MAC/cyc)\n"
+		f"  speedup              {ser/aut:.2f}x")

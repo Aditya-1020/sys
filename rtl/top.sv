@@ -84,6 +84,7 @@ module top #(
 	localparam integer CTRL_GO = 1; // rising edge launches one dma job
 	localparam integer CTRL_LOAD_W = 2; // reload stationary weights this job
 	localparam integer CTRL_STORE = 3; // rising edge stores one c tile to dst
+	localparam integer CTRL_AUTO_ST = 4; // hw self-launches a store per completed tile
 
 	// STATUS bit map (0x04)
 	localparam integer ST_DMA_BUSY = 0;
@@ -101,6 +102,7 @@ module top #(
 	localparam integer ST_WDMA_DONE = 12;
 	localparam integer ST_WDMA_ERR = 13; // bresp err
 	localparam integer ST_LEVEL_LSB = 16; // [21:16] fifo level
+	localparam integer ST_TILE_LSB = 22;
 
 	wire resetn_synced;
 	reset_sync_2ff u_rsync (
@@ -112,18 +114,22 @@ module top #(
 	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr;
 	logic [31:0] csr_status;
 
-	logic go_r, store_r;
+	logic go_r, store_r, auto_st_r;
 	always_ff @(posedge clk or negedge resetn_synced) begin
 		if (!resetn_synced) begin
 			go_r <= 1'b0;
 			store_r <= 1'b0;
+			auto_st_r <= 1'b0;
 		end else begin
 			go_r <= csr_ctrl[CTRL_GO];
 			store_r <= csr_ctrl[CTRL_STORE];
+			auto_st_r <= csr_ctrl[CTRL_AUTO_ST];
 		end
 	end
 	wire dma_start = csr_ctrl[CTRL_GO] && !go_r;
-	wire wdma_start = csr_ctrl[CTRL_STORE] && !store_r;
+	wire wdma_start_manual = csr_ctrl[CTRL_STORE] && !store_r;
+	wire auto_st_en = csr_ctrl[CTRL_AUTO_ST];
+	wire auto_st_arm = auto_st_en && !auto_st_r; // enable rising edge reloads the pointer
 
 	wire dma_busy, dma_done, dma_err;
 	wire dma_fill_done, dma_swap;
@@ -158,6 +164,43 @@ module top #(
 	wire wdma_busy, wdma_done, wdma_err, wdma_fifo_rd, csr_result_rd;
 	assign fifo_rd = wdma_busy ? wdma_fifo_rd : csr_result_rd;
 
+	// result store
+	localparam integer TILE_BEATS = MATRIX_SIZE * MATRIX_SIZE; // 16
+	localparam integer TILE_BYTES = TILE_BEATS * 4; // 64, one INCR burst
+
+	wire tile_ready = (fifo_level >= 6'(TILE_BEATS));
+	wire wdma_start = wdma_start_manual || (auto_st_en && tile_ready && !wdma_busy);
+
+	logic [31:0] dst_ptr_r;
+	wire [31:0] wdma_dst = auto_st_en ? dst_ptr_r : csr_dst_addr;
+	always_ff @(posedge clk or negedge resetn_synced) begin
+		if (!resetn_synced) begin
+			dst_ptr_r <= '0;
+		end else if (auto_st_arm) begin
+			dst_ptr_r <= csr_dst_addr;
+		end else if (wdma_start) begin
+			dst_ptr_r <= wdma_dst + 32'(TILE_BYTES);
+		end
+	end
+
+	logic wdma_done_r;
+	always_ff @(posedge clk or negedge resetn_synced) begin
+		if (!resetn_synced) wdma_done_r <= 1'b0;
+		else wdma_done_r <= wdma_done;
+	end
+	wire wdma_done_edge = wdma_done && !wdma_done_r;
+
+	logic [3:0] tile_cnt_r;
+	always_ff @(posedge clk or negedge resetn_synced) begin
+		if (!resetn_synced) begin
+			tile_cnt_r <= '0;
+		end else if (auto_st_arm) begin
+			tile_cnt_r <= '0;
+		end else if (wdma_done_edge) begin
+			tile_cnt_r <= tile_cnt_r + 1'b1;
+		end
+	end
+
 	always_comb begin
 		csr_status = '0;
 		csr_status[ST_DMA_BUSY] = dma_busy;
@@ -175,6 +218,7 @@ module top #(
 		csr_status[ST_WDMA_DONE] = wdma_done;
 		csr_status[ST_WDMA_ERR] = wdma_err;
 		csr_status[ST_LEVEL_LSB +: 6] = fifo_level;
+		csr_status[ST_TILE_LSB +: 4] = tile_cnt_r;
 	end
 
 	axi_lite_csr u_csr (
@@ -213,7 +257,7 @@ module top #(
 	) u_wdma (
 		.clk          (clk),
 		.rstn         (resetn_synced),
-		.i_dst_addr   (csr_dst_addr),
+		.i_dst_addr   (wdma_dst),
 		.i_start      (wdma_start),
 		.o_busy       (wdma_busy),
 		.o_done       (wdma_done),
