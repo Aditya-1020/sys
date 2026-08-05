@@ -8,8 +8,8 @@ set_false_path -from [get_ports rstn]
 set AXI_INPUTS  [get_ports -quiet {i_s_axil_* i_m_axi_*}]
 set AXI_OUTPUTS [get_ports -quiet {o_s_axil_* o_m_axi_*}]
 
-set INPUT_DELAY_MAX  [expr {0.20 * $SYS_PERIOD}]
-set INPUT_DELAY_MIN  [expr {0.05 * $SYS_PERIOD}]
+set INPUT_DELAY_MAX  [expr {0.30 * $SYS_PERIOD}]
+set INPUT_DELAY_MIN  [expr {0.25 * $SYS_PERIOD}]
 set OUTPUT_DELAY_MAX [expr {0.20 * $SYS_PERIOD}]
 set OUTPUT_DELAY_MIN 0.00
 

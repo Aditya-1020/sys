@@ -3,8 +3,8 @@ source [file join [file dirname [info script]] base.sdc]
 set_clock_uncertainty -setup 0.30 [get_clocks SYS_CLK]
 set_clock_uncertainty -hold  0.10 [get_clocks SYS_CLK]
 
-set_timing_derate -early 0.95
-set_timing_derate -late  1.05
+set_timing_derate -early 0.98
+set_timing_derate -late  1.02
 
 set_max_transition 0.60 [current_design]
 set_max_fanout 16 [current_design]
