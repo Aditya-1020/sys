@@ -5,7 +5,8 @@ module array_control #(
 	parameter integer MATRIX_SIZE = 4,
 	parameter integer DATA_WIDTH = 8,
 	parameter integer SRAM_ADDR_W = 6,
-	
+	parameter integer LEN_W = SRAM_ADDR_W + 1,
+
 	parameter integer ROW_W = MATRIX_SIZE*DATA_WIDTH, // 32, packed matrix row
 	parameter integer LANE_W = $clog2(MATRIX_SIZE)
 )(
@@ -13,6 +14,7 @@ module array_control #(
 	input wire rstn,
 	input wire i_enable, // csr enable
 	input wire i_load_w, // reloads stationary weights; clear=0 for reuse
+	input wire [LEN_W-1:0] i_len,
 	input wire i_room,
 
 	// dma and top hs
@@ -49,13 +51,36 @@ module array_control #(
 	state_t current_state, next_state;
 
 	logic [PTR_W-1:0] rd_ptr_r;
+	logic [SRAM_ADDR_W-1:0] job_base_r;
+	logic buf_live_r;
 	logic w_valid_r, load_w_r;
 	wire load_w_now = i_load_w || !w_valid_r;
 
-	wire start_job = (current_state == IDLE) && i_enable && i_fill_done && i_room;
+	wire start_job = (current_state == IDLE) && i_enable && i_room && (i_fill_done || buf_live_r);
 	wire [PTR_W-1:0] last_word = load_w_r ? unsigned'(PTR_W'(JOB_WORDS-1)) : unsigned'(PTR_W'(MATRIX_SIZE-1));
 	wire fetch_last = (current_state == FETCH) && (rd_ptr_r == last_word);
 	wire job_end = (current_state == RUN) && i_sys_done;
+	wire [LEN_W-1:0] next_base = {1'b0, job_base_r} + LEN_W'(load_w_r ? JOB_WORDS : MATRIX_SIZE);
+	wire last_job = (next_base >= i_len);
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			job_base_r <= '0;
+			buf_live_r <= 1'b0;
+		end else begin
+			if (start_job) begin
+				buf_live_r <= 1'b1;
+			end
+			if (job_end) begin
+				if (last_job) begin
+					job_base_r <= '0;
+					buf_live_r <= 1'b0;
+				end else begin
+					job_base_r <= next_base[SRAM_ADDR_W-1:0];
+				end
+			end
+		end
+	end
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
@@ -113,7 +138,7 @@ module array_control #(
 	end
 
 	assign o_cs_array = (current_state == FETCH);
-	assign o_addr_array = SRAM_ADDR_W'(rd_ptr_r);
+	assign o_addr_array = job_base_r + SRAM_ADDR_W'(rd_ptr_r);
 
 	logic rd_vld_r, rd_isb_r;
 	logic [LANE_W-1:0] rd_lane_r;
@@ -138,7 +163,7 @@ module array_control #(
 	assign o_a_valid = rd_vld_r && !rd_isb_r;
 	assign o_start = (current_state == START);
 
-	assign o_array_done = (current_state == IDLE) && i_enable && i_room;
+	assign o_array_done = (current_state == IDLE) && i_enable && i_room && !buf_live_r;
 	assign o_busy = (current_state != IDLE);
 
 endmodule

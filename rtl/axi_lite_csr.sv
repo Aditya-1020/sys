@@ -3,12 +3,19 @@
 
 module axi_lite_csr #(
 	parameter int ADDR_WIDTH = 8,
-	parameter int DATA_WIDTH = 32
+	parameter int DATA_WIDTH = 32,
+
+	// only the implemented bits of these registers are stored; the rest read back 0
+	parameter int CTRL_W = 6,  // EN, GO, LOAD_W, STORE, AUTO_ST, AUTO_FILL
+	parameter int LEN_W = 7,   // 1..64 words
+	parameter int NJOBS_W = 16 // auto-fill tile count
 )(
 	input wire aclk,
 	input wire aresetn,
 
-	// write addr channel
+	// write addr channel. byte address into a word-aligned register file, so both
+	// address ports drop [1:0] -- see ADDR_LSB below
+	/* verilator lint_off UNUSEDSIGNAL */
 	input wire [ADDR_WIDTH-1:0] i_s_axil_awaddr,
 	input wire i_s_axil_awvalid,
 	output logic o_s_axil_awready,
@@ -26,6 +33,7 @@ module axi_lite_csr #(
 
 	// read addr channel
 	input wire [ADDR_WIDTH-1:0] i_s_axil_araddr,
+	/* verilator lint_on UNUSEDSIGNAL */
 	input wire i_s_axil_arvalid,
 	output logic o_s_axil_arready,
 
@@ -38,11 +46,11 @@ module axi_lite_csr #(
 
 	// csr interface
 	input wire [DATA_WIDTH-1:0] csr_status, // status from 0x04
-	output logic [DATA_WIDTH-1:0] csr_ctrl, // en/go
+	output wire [DATA_WIDTH-1:0] csr_ctrl, // en/go
 	output logic [DATA_WIDTH-1:0] csr_src_addr,// dma byte addr
-	output logic [DATA_WIDTH-1:0] csr_len, // dma word cnt
+	output wire [DATA_WIDTH-1:0] csr_len, // dma word cnt
 	output logic [DATA_WIDTH-1:0] csr_dst_addr,// result store byte addr
-	output logic [DATA_WIDTH-1:0] csr_njobs, // auto-fill tiles for self-launch
+	output wire [DATA_WIDTH-1:0] csr_njobs, // auto-fill tiles for self-launch
 
 	input wire [DATA_WIDTH-1:0] csr_result,
 	output wire csr_result_rd
@@ -58,11 +66,15 @@ module axi_lite_csr #(
 	localparam logic [IDX_W-1:0] IDX_DST_ADDR = 5;  // 0x14 RW
 	localparam logic [IDX_W-1:0] IDX_NJOBS = 6; // 0x18 RW
 
-	logic awskd_valid, wskd_valid, arskd_valid;
+	logic awskd_valid, arskd_valid;
+	wire wskd_valid;
 	logic [IDX_W-1:0] awskd_addr, arskd_addr;
-	logic [DATA_WIDTH-1:0] wskd_data, wskd_ctrl;
+	wire [DATA_WIDTH-1:0] wskd_data;
+	/* verilator lint_off UNUSEDSIGNAL */
+	logic [DATA_WIDTH-1:0] wskd_ctrl;
 	logic [DATA_WIDTH-1:0] wskd_src_addr, wskd_len, wskd_dst_addr, wskd_njobs;
-	logic [(DATA_WIDTH/8)-1:0] wskd_strb;
+	/* verilator lint_on UNUSEDSIGNAL */
+	wire [(DATA_WIDTH/8)-1:0] wskd_strb;
 	logic axil_wr_ready, axil_rd_ready;
 
 	logic axil_bvalid_r, axil_rvalid_r;
@@ -91,18 +103,10 @@ module axi_lite_csr #(
 		.o_data (awskd_addr)
 	);
 
-	skid_buffer #(
-		.N(DATA_WIDTH+(DATA_WIDTH/8))
-	) w_skid (
-		.clk    (aclk),
-		.rstn   (aresetn),
-		.i_valid(i_s_axil_wvalid),
-		.o_ready(o_s_axil_wready),
-		.i_ready(axil_wr_ready),
-		.o_valid(wskd_valid),
-		.i_data ({i_s_axil_wdata, i_s_axil_wstrb}),
-		.o_data ({wskd_data, wskd_strb})
-	);
+	assign wskd_valid = i_s_axil_wvalid;
+	assign wskd_data = i_s_axil_wdata;
+	assign wskd_strb = i_s_axil_wstrb;
+	assign o_s_axil_wready = axil_wr_ready;
 
 	skid_buffer #(
 		.N(IDX_W)
@@ -145,19 +149,27 @@ module axi_lite_csr #(
 		endcase
 	end
 
+	logic [CTRL_W-1:0] csr_ctrl_r;
+	logic [LEN_W-1:0] csr_len_r;
+	logic [NJOBS_W-1:0] csr_njobs_r;
+
+	assign csr_ctrl = DATA_WIDTH'(csr_ctrl_r);
+	assign csr_len = DATA_WIDTH'(csr_len_r);
+	assign csr_njobs = DATA_WIDTH'(csr_njobs_r);
+
 	always_ff @(posedge aclk or negedge aresetn) begin
 		if (!aresetn) begin
-			csr_ctrl <= '0;
+			csr_ctrl_r <= '0;
 			csr_src_addr <= '0;
-			csr_len <= '0;
+			csr_len_r <= '0;
 			csr_dst_addr <= '0;
-			csr_njobs <= '0;
+			csr_njobs_r <= '0;
 		end else if (axil_wr_ready) begin
-			if (wr_ctrl) csr_ctrl <= wskd_ctrl;
+			if (wr_ctrl) csr_ctrl_r <= CTRL_W'(wskd_ctrl);
 			if (wr_src_addr) csr_src_addr <= wskd_src_addr;
-			if (wr_len) csr_len <= wskd_len;
+			if (wr_len) csr_len_r <= LEN_W'(wskd_len);
 			if (wr_dst_addr) csr_dst_addr <= wskd_dst_addr;
-			if (wr_njobs) csr_njobs <= wskd_njobs;
+			if (wr_njobs) csr_njobs_r <= NJOBS_W'(wskd_njobs);
 		end
 	end
 

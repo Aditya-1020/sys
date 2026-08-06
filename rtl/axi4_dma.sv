@@ -15,7 +15,9 @@ module axi4_dma #(
 	input wire rstn,
 
 	// from axi csr
-	input wire [AXI_ADDR_W-1:0] i_src_addr, // byte addr
+	/* verilator lint_off UNUSEDSIGNAL */
+	input wire [AXI_ADDR_W-1:0] i_src_addr, // byte addr, [1:0] dropped (word aligned)
+	/* verilator lint_on UNUSEDSIGNAL */
 	input wire [LEN_W-1:0] i_len, // words to move into half
 	input wire i_start, // pulse
 	output wire o_busy,
@@ -116,17 +118,15 @@ module axi4_dma #(
 		endcase
 	end
 
-	logic [AXI_ADDR_W-1:0] src_addr_r;
 	logic [LEN_W-1:0] len_r;
 
 	always_ff @(posedge clk) begin
 		if (idle_state && i_start) begin
-			src_addr_r <= i_src_addr;
 			len_r <= i_len;
 		end
 	end
 
-	assign o_m_araddr = {src_addr_r[AXI_ADDR_W-1:2], 2'b00};
+	assign o_m_araddr = {i_src_addr[AXI_ADDR_W-1:2], 2'b00};
 	assign o_m_arlen = len_r - 1'b1;
 
 	logic [SRAM_ADDR_W-1:0] wr_ptr_r;

@@ -13,7 +13,9 @@ module axi4_dma_wr #(
 	input wire clk,
 	input wire rstn,
 	// from axi csr
-	input wire [AXI_ADDR_W-1:0] i_dst_addr, // byte addr
+	/* verilator lint_off UNUSEDSIGNAL */
+	input wire [AXI_ADDR_W-1:0] i_dst_addr, // byte addr, [1:0] dropped (word aligned)
+	/* verilator lint_on UNUSEDSIGNAL */
 	input wire i_start, // pulse
 	output wire o_busy,
 	output wire o_done,
@@ -78,8 +80,6 @@ module axi4_dma_wr #(
 	wire idle_state = (current_state == IDLE);
 
 	logic [CNT_W-1:0] beat_cnt_r;
-	logic [AXI_ADDR_W-1:0] dst_addr_r;
-	
 	wire last_cnt = (beat_cnt_r == CNT_W'(BEATS-1));
 
 	logic aw_valid_int, aw_ready_int;
@@ -91,7 +91,9 @@ module axi4_dma_wr #(
 	b_payload_t b_data_int, b_data_out;
 
 	assign aw_data_int.id = '0; // single master; one outstanding transaction
-	assign aw_data_int.addr = {dst_addr_r[AXI_ADDR_W-1:2], 2'b00};
+	// no local address copy: top owns the one pointer and holds it steady until the
+	// aw skid has captured it (it only advances on the AW handshake)
+	assign aw_data_int.addr = {i_dst_addr[AXI_ADDR_W-1:2], 2'b00};
 	assign aw_data_int.len = 8'(BEATS-1);
 	assign aw_data_int.size = 3'b010; // 4 bytes per beat
 	assign aw_data_int.burst = 2'b01; // INCR
@@ -199,12 +201,6 @@ module axi4_dma_wr #(
 			current_state <= IDLE;
 		end else begin
 			current_state <= next_state;
-		end
-	end
-
-	always_ff @(posedge clk) begin
-		if (idle_state && i_start) begin
-			dst_addr_r <= i_dst_addr;
 		end
 	end
 

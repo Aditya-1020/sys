@@ -109,7 +109,9 @@ module top #(
 		.rstn_sync(resetn_synced)
 	);
 
+	/* verilator lint_off UNUSEDSIGNAL */
 	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr, csr_njobs;
+	/* verilator lint_on UNUSEDSIGNAL */
 	logic [31:0] csr_status;
 
 	logic go_r, store_r, auto_st_r, auto_fill_r;
@@ -172,16 +174,17 @@ module top #(
 
 	wire tile_ready = (fifo_level >= 6'(TILE_BEATS));
 	wire wdma_start = wdma_start_manual || (auto_st_en && tile_ready && !wdma_busy);
+	wire aw_fire = o_m_axi_awvalid && i_m_axi_awready;
 
 	logic [31:0] dst_ptr_r;
-	wire [31:0] wdma_dst = auto_st_en ? dst_ptr_r : csr_dst_addr;
+	wire [31:0] wdma_dst = dst_ptr_r;
 	always_ff @(posedge clk or negedge resetn_synced) begin
 		if (!resetn_synced) begin
 			dst_ptr_r <= '0;
-		end else if (auto_st_arm) begin
+		end else if (auto_st_arm || wdma_start_manual) begin
 			dst_ptr_r <= csr_dst_addr;
-		end else if (wdma_start) begin
-			dst_ptr_r <= wdma_dst + 32'(TILE_BYTES);
+		end else if (aw_fire && auto_st_en) begin
+			dst_ptr_r <= dst_ptr_r + 32'(TILE_BYTES);
 		end
 	end
 
@@ -200,6 +203,40 @@ module top #(
 			tile_cnt_r <= '0;
 		end else if (wdma_done_edge) begin
 			tile_cnt_r <= tile_cnt_r + 1'b1;
+		end
+	end
+	
+	localparam integer NJOB_W = 16;
+
+	logic [31:0] src_ptr_r;
+	logic [NJOB_W-1:0] fill_left_r;
+
+	wire auto_fill_pend = auto_fill_en && (fill_left_r != '0);
+	wire auto_fill_go = auto_fill_pend && !dma_busy; // one cycle: dma leaves IDLE next clk
+	wire dma_start = dma_start_manual || auto_fill_go;
+	wire [31:0] dma_src = src_ptr_r;
+	wire [31:0] fill_stride = {23'b0, csr_len[LEN_W-1:0], 2'b00}; // words -> bytes
+
+	wire ar_fire = o_m_axi_arvalid && i_m_axi_arready;
+
+	always_ff @(posedge clk or negedge resetn_synced) begin
+		if (!resetn_synced) begin
+			src_ptr_r <= '0;
+			fill_left_r <= '0;
+		end else begin
+			if (auto_fill_arm) begin // rising edge reloads ptr + count
+				src_ptr_r <= csr_src_addr;
+			end else if (dma_start_manual) begin
+				src_ptr_r <= csr_src_addr;
+			end else if (ar_fire && auto_fill_en) begin
+				src_ptr_r <= src_ptr_r + fill_stride;
+			end
+
+			if (auto_fill_arm) begin
+				fill_left_r <= csr_njobs[NJOB_W-1:0];
+			end else if (auto_fill_go) begin
+				fill_left_r <= fill_left_r - 1'b1;
+			end
 		end
 	end
 
@@ -350,6 +387,7 @@ module top #(
 		.rstn          (resetn_synced),
 		.i_enable      (csr_ctrl[CTRL_EN]),
 		.i_load_w      (csr_ctrl[CTRL_LOAD_W]),
+		.i_len         (csr_len[LEN_W-1:0]),
 		.i_room        (fifo_room), // no room for run stay idle
 		.i_fill_done   (dma_fill_done),
 		.o_array_done  (array_release),

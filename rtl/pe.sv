@@ -46,16 +46,9 @@ module pe #(
 		mult_pipe <= a_r * w_r;
 	end
 
-	logic signed [2*DATA_WIDTH-1:0] mult_r;
-	always_ff @(posedge clk) begin
-		if (i_enable) begin
-			mult_r <= mult_pipe;
-		end
-	end
-
 	logic signed [ACC_WIDTH-1:0] accumulator;
 	wire signed [ACC_WIDTH-1:0] next_acc;
-	assign next_acc = i_psum + ACC_WIDTH'(mult_r);
+	assign next_acc = i_psum + ACC_WIDTH'(mult_pipe);
 
 	always_ff @(posedge clk) begin
 		if (i_enable) begin
