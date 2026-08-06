@@ -1,4 +1,6 @@
-set SYS_PERIOD 10.0
+# Single-sourced from CLOCK_PERIOD in config.json (also ABC's delay target during
+# synthesis). Falls back to 10.0 when read outside the librelane flow.
+set SYS_PERIOD [expr {[info exists ::env(CLOCK_PERIOD)] ? $::env(CLOCK_PERIOD) : 10.0}]
 
 create_clock -name SYS_CLK -period $SYS_PERIOD [get_ports clk]
 set_clock_transition 0.15 [get_clocks SYS_CLK]

@@ -6,6 +6,7 @@ VERILOG_SV2V = verilog_sv2v
 
 LIBLANE_CONFIG ?= config.json
 PYTHON ?= .venv/bin/python
+VENV_PYTHON ?= /usr/bin/python3
 
 SV_RTL = $(wildcard $(RTL_DIR)/*.sv)
 V_MODELS = $(wildcard $(RTL_DIR)/*.v)
@@ -16,9 +17,18 @@ LIB_DIR ?= $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/lib
 FULL_LIB := $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
 TRIM_LIB := $(BUILD_DIR)/sky130_fd_sc_hd__tt_025C_1v80.trimmed.lib
 
+SRAM_DIR := sram22_64x32m4w8
+SRAM_BUILD := $(BUILD_DIR)/$(SRAM_DIR)
+SRAM_GDS := $(SRAM_DIR)/$(SRAM_DIR).gds
+SRAM_LEF := $(SRAM_DIR)/$(SRAM_DIR).lef
+SRAM_CORNERS := tt_025C_1v80 ss_100C_1v60 ff_n40C_1v95
+SRAM_LIBS := $(patsubst %,$(SRAM_BUILD)/$(SRAM_DIR)_%.lib,$(SRAM_CORNERS))
+SRAM_LEF_OUT := $(SRAM_BUILD)/$(SRAM_DIR).lef
+SRAM_GDS_OUT := $(SRAM_BUILD)/$(SRAM_DIR).gds
+
 TT_SYNTH_LIB := $(TRIM_LIB)
 TT_STA_LIB := $(FULL_LIB)
-STA_SRAM_LIB := sram22_64x32m4w8/patched/sram22_64x32m4w8_tt_025C_1v80.lib
+STA_SRAM_LIB := $(SRAM_BUILD)/$(SRAM_DIR)_tt_025C_1v80.lib
 
 export TT_STA_LIB
 export TT_SYNTH_LIB
@@ -28,13 +38,11 @@ SYNTH_TOP ?= systolic_array
 SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
 STA_TOP ?= pe
 
-.PHONY: all cocotb vectors xrun sim-sv waves sv2v_rtl synth sta sta-shell lint sram-lib liblane lib-last_run report clean
+.PHONY: all venv cocotb vectors waves sv2v_rtl synth sta sta-shell lint sram liblane lib-last_run report clean
 
 all: cocotb
 
 VECTORS = $(TB_DIR)/vectors/stim.hex $(TB_DIR)/vectors/golden.hex
-TB_SV = $(TB_DIR)/tb_top.sv
-COCOTB_PRELOAD ?= $(firstword $(wildcard /usr/lib/x86_64-linux-gnu/libexpat.so.1))
 
 $(VERILOG_SV2V) $(BUILD_DIR):
 	@mkdir -p $@
@@ -43,29 +51,25 @@ $(VERILOG_SV2V) $(BUILD_DIR):
 
 $(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
 	@echo '`timescale 1ps/1ps' > $@
-	@sv2v $< >> $@
+	@sv2v -DSYNTHESIS $< >> $@
 
 sv2v_rtl: $(V_RTL)
 
-cocotb: $(V_RTL)
-	LD_PRELOAD=$(COCOTB_PRELOAD) $(PYTHON) $(TB_DIR)/test_top.py
+cocotb: $(SV_RTL) $(V_MODELS)
+	$(PYTHON) $(TB_DIR)/test_top.py
 
 $(VECTORS) &: $(TB_DIR)/test_top.py
 	$(PYTHON) $(TB_DIR)/test_top.py --gen
 
 vectors: $(VECTORS)
 
-xrun: $(VECTORS) $(TB_SV) $(SV_RTL) $(V_MODELS) | $(BUILD_DIR)
-	xrun -64bit -sv -timescale 1ps/1ps -access +rwc \
-		-l $(BUILD_DIR)/xrun.log $(SV_RTL) $(V_MODELS) $(TB_SV)
-
-sim-sv: $(VECTORS) $(TB_SV) $(V_RTL) | $(BUILD_DIR)
-	iverilog -g2012 -s tb_top -o $(BUILD_DIR)/tb_top.vvp \
-		$(V_RTL) $(RTL_DIR)/sram22_64x32m4w8.v $(TB_SV)
-	vvp $(BUILD_DIR)/tb_top.vvp
-
 waves:
-	gtkwave $(BUILD_DIR)/tb_top.vcd &
+	gtkwave $(BUILD_DIR)/cocotb/top.fst &
+
+venv:
+	$(VENV_PYTHON) -m venv .venv
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install cocotb==2.0.1 numpy
 
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(addprefix -v ,$(V_MODELS))
@@ -85,16 +89,14 @@ sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$
 sta-shell:
 	scripts/stadebug $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(GUI),--gui,)
 
-SRAM_DIR := sram22_64x32m4w8
-SRAM_GDS := $(SRAM_DIR)/$(SRAM_DIR).gds
-SRAM_LEF := $(SRAM_DIR)/$(SRAM_DIR).lef
-SRAM_GDS_PATCHED := $(SRAM_DIR)/patched/$(SRAM_DIR).gds
+$(SRAM_LIBS) $(SRAM_LEF_OUT) &: $(wildcard $(SRAM_DIR)/*.lib) $(SRAM_LEF) scripts/build_sram_macro.py | $(BUILD_DIR)
+	python3 scripts/build_sram_macro.py --src $(SRAM_DIR) --out $(SRAM_BUILD)
 
-$(SRAM_GDS_PATCHED): $(SRAM_GDS) $(SRAM_LEF) scripts/patch_sram_gds.py
+$(SRAM_GDS_OUT): $(SRAM_GDS) $(SRAM_LEF) scripts/patch_sram_gds.py | $(BUILD_DIR)
 	klayout -b -r scripts/patch_sram_gds.py \
 		-rd gds=$(SRAM_GDS) -rd lef=$(SRAM_LEF) -rd out=$@
 
-sram-lib: $(SRAM_GDS_PATCHED)
+sram: $(SRAM_LIBS) $(SRAM_LEF_OUT) $(SRAM_GDS_OUT)
 
 RUN ?=
 LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
