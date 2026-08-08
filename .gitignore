@@ -36,3 +36,5 @@ macrofp.py
 no-sram/
 sram/
 scripts/build_*
+scripts/stapath*
+scripts/stadebug*
