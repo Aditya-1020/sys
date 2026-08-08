@@ -1,398 +1,542 @@
+from __future__ import annotations
+
+import json
+import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+RTL = ROOT / "rtl"
 VECTORS = ROOT / "tb" / "vectors"
 
-N = 4
-RESULT_BITS = 18
-CLK_NS = 10
+MACRO_MODELS = ROOT / "sram22_64x32m4w8"
+
 SRC_BASE = 0x1000
 DST_BASE = 0x2000
+ALT_DST = 0x8000
 
-CTRL = 0x00
-STATUS = 0x04
-SRC = 0x08
-LEN = 0x0C
-RESULT = 0x10
-DST = 0x14
-NJOBS = 0x18
-
-EN = 0x00000001
-GO = 0x00000002
-LOAD_W = 0x00000004
-STORE = 0x00000008
-AUTO_ST = 0x00000010
-AUTO_FILL = 0x00000020
-
-# Status bits
-DMA_BUSY = 0x00000001
-DMA_ERR = 0x00000004
-RES_OVF = 0x00000400
-WDMA_DONE = 0x00001000
-WDMA_ERR = 0x00002000
-
-TILE_LSB = 22
-
-def pack(m):
-	return np.ascontiguousarray(m, np.int8).view(np.uint32).ravel().tolist()
+CTRL_BITS = ("EN", "GO", "LOAD_W", "STORE", "AUTO_ST", "AUTO_FILL")
+STATUS_BITS = ("DMA_BUSY", "DMA_DONE", "DMA_ERR", "FILL_DONE", "CTRL_BUSY", "ARRAY_BUSY", "ARRAY_DONE", "PP_SEL", "W_VALID", "RES_VALID", "RES_OVF", "WDMA_BUSY", "WDMA_DONE", "WDMA_ERR", "AF_BUSY", "LEVEL_LSB", "TILE_LSB")
+REGS = ("CTRL", "STATUS", "SRC_ADDR", "LEN", "RESULT", "DST_ADDR", "NJOBS")
 
 
-def sign_extend(word):
-	word &= (1 << RESULT_BITS) - 1
-	return word - (1 << RESULT_BITS) if word >> (RESULT_BITS - 1) else word
+def clk_period_ns(default=10.0):
+    try:
+        return float(json.loads((ROOT / "config.json").read_text())["CLOCK_PERIOD"])
+    except (OSError, ValueError, KeyError):
+        return default
 
 
-def golden(a, b):
-	return a.astype(np.int32) @ b.astype(np.int32)
+def rtl_sources():
+    macros = [MACRO_MODELS / bb.name if (MACRO_MODELS / bb.name).is_file() else bb
+              for bb in sorted(RTL.glob("*.v"))]
+    return sorted(RTL.glob("*.sv")) + macros
 
+@dataclass(frozen=True)
+class Geometry:
+    n: int
+    data_w: int
+    result_w: int
+    level_bits: int = 0
+    tile_bits: int = 0
+    reg: dict = field(default_factory=dict)
+    ctrl: dict = field(default_factory=dict)
+    st: dict = field(default_factory=dict)
 
-def stream(rng, tiles):
-	b = rng.integers(-128, 128, (N, N), dtype=np.int8)
-	a = [rng.integers(-128, 128, (N, N), dtype=np.int8) for _ in range(tiles)]
-	words = pack(b) + [w for t in a for w in pack(t)]
-	return b, a, words
+    @property
+    def tile_words(self):
+        return self.n
 
+    @property
+    def weights_job(self):
+        return 2 * self.n
 
-class Accel:
-	def __init__(self, dut):
-		self.dut = dut
-		# byte addr -> word
-		self.mem = {}   # serves the read DMA
-		self.wmem = {}  #captures the write DMA
+    @property
+    def elems(self):
+        return self.n * self.n
 
-	@classmethod
-	async def new(cls, dut): # new clock reset full
-		self = cls(dut)
-		for sig in ("i_s_axil_awaddr", "i_s_axil_awvalid", "i_s_axil_wdata", "i_s_axil_wstrb",
-					"i_s_axil_wvalid", "i_s_axil_bready", "i_s_axil_araddr", "i_s_axil_arvalid",
-					"i_s_axil_rready", "i_m_axi_arready", "i_m_axi_rdata", "i_m_axi_rresp",
-					"i_m_axi_rlast", "i_m_axi_rvalid", "i_m_axi_awready", "i_m_axi_wready",
-					"i_m_axi_bresp", "i_m_axi_bvalid"):
-			getattr(dut, sig).value = 0
-		cocotb.start_soon(Clock(dut.clk, CLK_NS, unit="ns").start())
-		await self.reset()
-		cocotb.start_soon(self._read_slave())
-		cocotb.start_soon(self._write_slave())
-		cocotb.start_soon(self._swap_monitor())
-		return self
+    @property
+    def res_bits(self):
+        return self.elems * self.result_w
 
-	# pp_buf_sram swap contract: i_swap must miss the array read and its shadow
-	async def _swap_monitor(self):
-		buf = self.dut.u_sram
-		prev_cs = 0
-		while True:
-			await RisingEdge(self.dut.clk)
-			await ReadOnly()
-			swap, cs = int(buf.i_swap.value), int(buf.i_cs_array.value)
-			assert not (swap and (cs or prev_cs)), "i_swap collided with an array read"
-			prev_cs = cs
+    @property
+    def tile_beats(self):
+        assert self.res_bits % 32 == 0, "tile must be a whole number of beats"
+        return self.res_bits // 32
 
-	async def reset(self):
-		self.dut.rstn.value = 0
-		await ClockCycles(self.dut.clk, 8)
-		self.dut.rstn.value = 1
-		await ClockCycles(self.dut.clk, 8)
+    @property
+    def tile_bytes(self):
+        return self.tile_beats * 4
 
-	def cycles(self):
-		return get_sim_time("ns") / CLK_NS
+    @classmethod
+    def from_dut(cls, dut):
+        val = lambda h, name: int(getattr(h, name).value)
+        lsb = val(dut.u_csr, "ADDR_LSB")
+        return cls(
+            n=val(dut, "MATRIX_SIZE"), data_w=val(dut, "DATA_WIDTH"), result_w=val(dut, "RESULT_W"), 
+            level_bits=len(dut.fifo_level), tile_bits=len(dut.tile_cnt_r),
+            reg={k: val(dut.u_csr, f"IDX_{k}") << lsb for k in REGS}, ctrl={k: val(dut, f"CTRL_{k}") for k in CTRL_BITS}, 
+            st={k: val(dut, f"ST_{k}") for k in STATUS_BITS},
+        )
+    
+    @classmethod
+    def from_source(cls):
+        p = _source_localparams(RTL / "top.sv")
+        return cls(n=p["MATRIX_SIZE"], data_w=p["DATA_WIDTH"], result_w=p["RESULT_W"])
 
-	def load(self, addr, words):
-		for i, w in enumerate(words):
-			self.mem[addr + 4 * i] = w
+    def pack(self, m):
+        mask = (1 << self.data_w) - 1
+        return [sum((int(v) & mask) << (self.data_w * c) for c, v in enumerate(row))
+                for row in np.asarray(m)]
 
-	def tile_at(self, addr):
-		vals = [sign_extend(self.wmem[addr + 4 * i]) for i in range(N * N)]
-		return np.array(vals, np.int32).reshape(N, N)
+    def sext(self, word, bits=None):
+        bits = bits or self.result_w
+        word &= (1 << bits) - 1
+        return word - (1 << bits) if word >> (bits - 1) else word
 
-	# axil master
-	async def wr(self, addr, data):
-		d = self.dut
-		await RisingEdge(d.clk)
-		d.i_s_axil_awaddr.value = addr
-		d.i_s_axil_awvalid.value = 1
-		d.i_s_axil_wdata.value = data
-		d.i_s_axil_wstrb.value = 0xF
-		d.i_s_axil_wvalid.value = 1
-		d.i_s_axil_bready.value = 1
-		aw = w = False
-		while not (aw and w):
-			await RisingEdge(d.clk)
-			if not aw and d.o_s_axil_awready.value:
-				d.i_s_axil_awvalid.value = 0
-				aw = True
-			if not w and d.o_s_axil_wready.value:
-				d.i_s_axil_wvalid.value = 0
-				w = True
-		while not d.o_s_axil_bvalid.value:
-			await RisingEdge(d.clk)
-		await RisingEdge(d.clk)
-		d.i_s_axil_bready.value = 0
+    def rand(self, rng):
+        lim = 1 << (self.data_w - 1)
+        return rng.integers(-lim, lim, (self.n, self.n)).astype(np.int64)
 
-	async def rd(self, addr):
-		d = self.dut
-		await RisingEdge(d.clk)
-		d.i_s_axil_araddr.value = addr
-		d.i_s_axil_arvalid.value = 1
-		d.i_s_axil_rready.value = 1
-		while True:
-			await RisingEdge(d.clk)
-			if d.o_s_axil_arready.value:
-				d.i_s_axil_arvalid.value = 0
-				break
-		while not d.o_s_axil_rvalid.value:
-			await RisingEdge(d.clk)
-		data = int(d.o_s_axil_rdata.value)
-		await RisingEdge(d.clk)
-		d.i_s_axil_rready.value = 0
-		return data
+    def extreme(self):
+        return np.full((self.n, self.n), -(1 << (self.data_w - 1)), np.int64)
 
-	# axi4 mem
-	async def _read_slave(self):
-		d = self.dut
-		while True:
-			while not d.o_m_axi_arvalid.value:
-				await RisingEdge(d.clk)
-			beats = int(d.o_m_axi_arlen.value) + 1
-			addr = int(d.o_m_axi_araddr.value)
-			d.i_m_axi_arready.value = 1
-			await RisingEdge(d.clk)
-			d.i_m_axi_arready.value = 0
-			for i in range(beats):
-				d.i_m_axi_rdata.value = self.mem.get(addr + 4 * i, 0)
-				d.i_m_axi_rvalid.value = 1
-				d.i_m_axi_rlast.value = int(i == beats - 1)
-				await RisingEdge(d.clk)
-				while not d.o_m_axi_rready.value:
-					await RisingEdge(d.clk)
-			d.i_m_axi_rvalid.value = d.i_m_axi_rlast.value = 0
+    def golden(self, a, b):
+        return np.asarray(a, np.int64) @ np.asarray(b, np.int64)
 
-	async def _write_slave(self):
-		d = self.dut
-		while True:
-			while not d.o_m_axi_awvalid.value:
-				await RisingEdge(d.clk)
-			addr= int(d.o_m_axi_awaddr.value)
-			beats = int(d.o_m_axi_awlen.value) + 1
-			d.i_m_axi_awready.value = 1
-			await RisingEdge(d.clk)
-			d.i_m_axi_awready.value = 0
-			d.i_m_axi_wready.value = 1
-			n = 0
-			while n < beats:
-				await ReadOnly()
-				fired = bool(d.o_m_axi_wvalid.value)
-				data = int(d.o_m_axi_wdata.value)
-				last = bool(d.o_m_axi_wlast.value)
-				await RisingEdge(d.clk)
-				if fired:
-					self.wmem[addr + 4 * n] = data
-					n += 1
-					assert last == (n == beats), f"wlast at beat {n} of {beats}"
-			d.i_m_axi_wready.value = 0
-			d.i_m_axi_bvalid.value = 1
-			while True:
-				await ReadOnly()
-				done = bool(d.o_m_axi_bready.value)
-				await RisingEdge(d.clk)
-				if done:
-					break
-			d.i_m_axi_bvalid.value = 0
+    def pack_results(self, m):
+        mask = (1 << self.result_w) - 1
+        stream = 0
+        for j, v in enumerate(np.asarray(m, np.int64).ravel()):
+            stream |= (int(v) & mask) << (self.result_w * j)
+        return [(stream >> (32 * i)) & 0xffffffff for i in range(self.tile_beats)]
 
-	async def check_status(self):
-		s = await self.rd(STATUS)
-		assert not s & DMA_ERR, f"read dma error, STATUS=0x{s:08x}"
-		assert not s & WDMA_ERR, f"write dma error, STATUS=0x{s:08x}"
-		assert not s & RES_OVF, f"result fifo overflow, STATUS=0x{s:08x}"
-		return s
+    def unpack_results(self, words):
+        stream = 0
+        for i, w in enumerate(words):
+            stream |= (int(w) & 0xffffffff) << (32 * i)
+        mask = (1 << self.result_w) - 1
+        return [self.sext((stream >> (self.result_w * j)) & mask, self.result_w)
+                for j in range(self.elems)]
 
-	async def wait_idle(self, timeout=500):
-		for _ in range(timeout):
-			if not await self.check_status() & DMA_BUSY:
-				return
-			await RisingEdge(self.dut.clk)
-		raise TimeoutError("read dma never went idle")
+    def stream(self, rng, tiles):
+        b = self.rand(rng)
+        a = [self.rand(rng) for _ in range(tiles)]
+        return b, a, self.pack(b) + [w for t in a for w in self.pack(t)]
 
-	async def wait_tiles(self, n, timeout=20000):
-		seen = prev = 0
-		for _ in range(timeout):
-			cnt = (await self.check_status() >> TILE_LSB) & 0xF
-			seen += (cnt - prev) & 0xF
-			prev = cnt
-			if seen >= n:
-				return
-			await RisingEdge(self.dut.clk)
-		raise TimeoutError(f"only {seen}/{n} tiles stored")
+_LOCALPARAM = re.compile(r"localparam\s+integer\s+(\w+)\s*=\s*([^;]+);")
 
-	async def job(self, words, load_w, src=SRC_BASE, extra=0):
-		ctrl = EN | (LOAD_W if load_w else 0) | extra
-		await self.wr(SRC, src)
-		await self.wr(LEN, words)
-		await self.wr(CTRL, ctrl)
-		await self.wr(CTRL, ctrl | GO)
-
-	async def pop_tile(self):
-		vals = [sign_extend(await self.rd(RESULT)) for _ in range(N * N)]
-		return np.array(vals, np.int32).reshape(N, N)
-
-	async def run_chained(self, dst, tiles):
-		await self.wr(CTRL, EN)
-		await self.wr(DST, dst)
-		await self.wr(SRC, SRC_BASE)
-		await self.wr(LEN, 2 * N)
-		await self.wr(NJOBS, tiles - 1)
-		await self.wr(CTRL, EN | LOAD_W | AUTO_ST)
-		t0 = self.cycles()
-		await self.wr(CTRL, EN | LOAD_W | AUTO_ST | GO)
-		await self.wr(SRC, SRC_BASE + 2 * N * 4)
-		await self.wr(LEN, N)
-		await self.wr(CTRL, EN | AUTO_ST | AUTO_FILL)
-		await self.wait_tiles(tiles)
-		return self.cycles() - t0
-
-	async def run_cpu(self, b, a, dst): # seq fill and stores
-		for i, tile in enumerate(a):
-			await self.wait_idle()
-			self.mem.clear()
-			self.load(SRC_BASE, pack(b) + pack(tile) if i == 0 else pack(tile))
-			await self.job(words=2 * N if i == 0 else N, load_w=(i == 0))
-			for _ in range(500):
-				if ((await self.check_status()) >> 16 & 0x3F) >= N * N:
-					break
-				await RisingEdge(self.dut.clk)
-			await self.wr(DST, dst + i * N * N * 4)
-			await self.wr(CTRL, EN | STORE)
-			await self.wr(CTRL, EN)
-			for _ in range(500):
-				if await self.check_status() & WDMA_DONE:
-					break
-				await RisingEdge(self.dut.clk)
-
+def _source_localparams(path):
+    env = {"clog2": lambda x: max(1, (int(x) - 1).bit_length())}
+    out = {}
+    for name, expr in _LOCALPARAM.findall(path.read_text()):
+        try:
+            out[name] = int(eval(expr.replace("$clog2", "clog2"), {"__builtins__": {}}, {**env, **out}))
+        except Exception:
+            continue
+    return out
 
 def write_vectors(seed=7):
-	rng = np.random.default_rng(seed)
-	b, a, words = stream(rng, tiles=1)
-	VECTORS.mkdir(parents=True, exist_ok=True)
-	(VECTORS / "stim.hex").write_text("".join(f"{w:08x}\n" for w in words))
-	(VECTORS / "golden.hex").write_text("".join(f"{int(v) & 0xffffffff:08x}\n" for v in golden(a[0], b).ravel()))
-	print(f"wrote {VECTORS}/stim.hex ({len(words)} words) and golden.hex ({N*N} words)")
+    g = Geometry.from_source()
+    b, a, words = g.stream(np.random.default_rng(seed), tiles=1)
+    VECTORS.mkdir(parents=True, exist_ok=True)
+    (VECTORS / "stim.hex").write_text("".join(f"{w:08x}\n" for w in words))
+    (VECTORS / "golden.hex").write_text(
+        "".join(f"{w:08x}\n" for w in g.pack_results(g.golden(a[0], b))))
+    print(f"wrote {VECTORS}/stim.hex ({len(words)} words) "
+          f"and golden.hex ({g.tile_beats} words, {g.elems}x{g.result_w}b tight) "
+          f"for {g.n}x{g.n} x {g.data_w}b")
 
 
 if __name__ == "__main__" and "--gen" in sys.argv:
-	write_vectors()
-	sys.exit(0)
+    write_vectors()
+    sys.exit(0)
+
 
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 from cocotb.utils import get_sim_time
 
+CLK_NS = clk_period_ns()
+
+
+class Accel:
+    def __init__(self, dut, g):
+        self.dut, self.g = dut, g
+        self.mem = {}    # byte addr -> word, serves the read DMA
+        self.wmem = {}   # byte addr -> word, captures the write DMA
+
+    @classmethod
+    async def new(cls, dut):
+        self = cls(dut, Geometry.from_dut(dut))
+        for handle in dut:                      # every top-level input is i_*
+            if handle._name.startswith("i_"):
+                handle.value = 0
+        cocotb.start_soon(Clock(dut.clk, CLK_NS, unit="ns").start())
+        await self.reset()
+        cocotb.start_soon(self._read_slave())
+        cocotb.start_soon(self._write_slave())
+        cocotb.start_soon(self._swap_monitor())
+        return self
+
+    def ctrl(self, *names):
+        return sum(1 << self.g.ctrl[n] for n in names)
+
+    def _bit(self, status, name):
+        return (status >> self.g.st[name]) & 1
+
+    def _field(self, status, lsb_name, bits):
+        return (status >> self.g.st[lsb_name]) & ((1 << bits) - 1)
+
+    async def _swap_monitor(self):
+        buf = self.dut.u_sram
+        prev_cs = 0
+        while True:
+            await RisingEdge(self.dut.clk)
+            await ReadOnly()
+            swap, cs = int(buf.i_swap.value), int(buf.i_cs_array.value)
+            assert not (swap and (cs or prev_cs)), "i_swap collided with an array read"
+            prev_cs = cs
+
+    async def reset(self):
+        self.dut.rstn.value = 0
+        await ClockCycles(self.dut.clk, 8)
+        self.dut.rstn.value = 1
+        await ClockCycles(self.dut.clk, 8)
+
+    def cycles(self):
+        return get_sim_time("ns") / CLK_NS
+
+    def load(self, addr, words):
+        for i, w in enumerate(words):
+            self.mem[addr + 4 * i] = w
+
+    def tile_at(self, addr):
+        words = [self.wmem[addr + 4 * i] for i in range(self.g.tile_beats)]
+        return np.array(self.g.unpack_results(words),
+                        np.int64).reshape(self.g.n, self.g.n)
+
+    # axil master
+    async def wr(self, reg, data):
+        d = self.dut
+        await RisingEdge(d.clk)
+        d.i_s_axil_awaddr.value = self.g.reg[reg]
+        d.i_s_axil_awvalid.value = 1
+        d.i_s_axil_wdata.value = data
+        d.i_s_axil_wstrb.value = 0xF
+        d.i_s_axil_wvalid.value = 1
+        d.i_s_axil_bready.value = 1
+        aw = w = False
+        while not (aw and w):
+            await RisingEdge(d.clk)
+            if not aw and d.o_s_axil_awready.value:
+                d.i_s_axil_awvalid.value = 0
+                aw = True
+            if not w and d.o_s_axil_wready.value:
+                d.i_s_axil_wvalid.value = 0
+                w = True
+        while not d.o_s_axil_bvalid.value:
+            await RisingEdge(d.clk)
+        await RisingEdge(d.clk)
+        d.i_s_axil_bready.value = 0
+
+    async def rd(self, reg):
+        d = self.dut
+        await RisingEdge(d.clk)
+        d.i_s_axil_araddr.value = self.g.reg[reg]
+        d.i_s_axil_arvalid.value = 1
+        d.i_s_axil_rready.value = 1
+        while True:
+            await RisingEdge(d.clk)
+            if d.o_s_axil_arready.value:
+                d.i_s_axil_arvalid.value = 0
+                break
+        while not d.o_s_axil_rvalid.value:
+            await RisingEdge(d.clk)
+        data = int(d.o_s_axil_rdata.value)
+        await RisingEdge(d.clk)
+        d.i_s_axil_rready.value = 0
+        return data
+
+    # AXI4 mem
+    async def _read_slave(self):
+        d = self.dut
+        while True:
+            while not d.o_m_axi_arvalid.value:
+                await RisingEdge(d.clk)
+            beats = int(d.o_m_axi_arlen.value) + 1
+            addr = int(d.o_m_axi_araddr.value)
+            d.i_m_axi_arready.value = 1
+            await RisingEdge(d.clk)
+            d.i_m_axi_arready.value = 0
+            for i in range(beats):
+                d.i_m_axi_rdata.value = self.mem.get(addr + 4 * i, 0)
+                d.i_m_axi_rvalid.value = 1
+                d.i_m_axi_rlast.value = int(i == beats - 1)
+                await RisingEdge(d.clk)
+                while not d.o_m_axi_rready.value:
+                    await RisingEdge(d.clk)
+            d.i_m_axi_rvalid.value = d.i_m_axi_rlast.value = 0
+
+    async def _write_slave(self):
+        d = self.dut
+        while True:
+            while not d.o_m_axi_awvalid.value:
+                await RisingEdge(d.clk)
+            addr = int(d.o_m_axi_awaddr.value)
+            beats = int(d.o_m_axi_awlen.value) + 1
+            d.i_m_axi_awready.value = 1
+            await RisingEdge(d.clk)
+            d.i_m_axi_awready.value = 0
+            d.i_m_axi_wready.value = 1
+            n = 0
+            while n < beats:
+                await ReadOnly()
+                fired = bool(d.o_m_axi_wvalid.value)
+                data = int(d.o_m_axi_wdata.value) if fired else 0
+                last = bool(d.o_m_axi_wlast.value) if fired else False
+                await RisingEdge(d.clk)
+                if fired:
+                    self.wmem[addr + 4 * n] = data
+                    n += 1
+                    assert last == (n == beats), f"wlast at beat {n} of {beats}"
+            d.i_m_axi_wready.value = 0
+            d.i_m_axi_bvalid.value = 1
+            while True:
+                await ReadOnly()
+                done = bool(d.o_m_axi_bready.value)
+                await RisingEdge(d.clk)
+                if done:
+                    break
+            d.i_m_axi_bvalid.value = 0
+
+    # ---- status
+
+    async def status(self):
+        """Raw STATUS, no assertions -- for tests that expect an error bit."""
+        return await self.rd("STATUS")
+
+    async def check(self):
+        s = await self.status()
+        assert not self._bit(s, "DMA_ERR"), f"read dma error, STATUS=0x{s:08x}"
+        assert not self._bit(s, "WDMA_ERR"), f"write dma error, STATUS=0x{s:08x}"
+        assert not self._bit(s, "RES_OVF"), f"result fifo overflow, STATUS=0x{s:08x}"
+        return s
+
+    async def _poll(self, done, what, tries):
+        for _ in range(tries):
+            if done(await self.check()):
+                return
+            await RisingEdge(self.dut.clk)
+        raise TimeoutError(f"timed out waiting for {what}")
+
+    async def wait_idle(self):
+        await self._poll(lambda s: not self._bit(s, "DMA_BUSY"),
+                         "read dma to go idle", 500)
+
+    async def wait_level(self, count):
+        await self._poll(
+            lambda s: self._field(s, "LEVEL_LSB", self.g.level_bits) >= count,
+            f"{count} results in the fifo", 500)
+
+    async def wait_wdma(self):
+        await self._poll(lambda s: self._bit(s, "WDMA_DONE"),
+                         "write dma to finish", 500)
+
+    async def wait_tiles(self, n):
+        """Tile counter is narrow and wraps; accumulate deltas modulo its width."""
+        mask = (1 << self.g.tile_bits) - 1
+        seen = prev = 0
+        for _ in range(400 * n + 2000):
+            cnt = self._field(await self.check(), "TILE_LSB", self.g.tile_bits)
+            seen += (cnt - prev) & mask
+            prev = cnt
+            if seen >= n:
+                return
+            await RisingEdge(self.dut.clk)
+        raise TimeoutError(f"only {seen}/{n} tiles stored")
+
+    async def job(self, words, load_w, src=SRC_BASE, extra=()):
+        base = self.ctrl("EN", *(("LOAD_W",) if load_w else ()), *extra)
+        await self.wr("SRC_ADDR", src)
+        await self.wr("LEN", words)
+        await self.wr("CTRL", base)
+        await self.wr("CTRL", base | self.ctrl("GO"))
+
+    async def pop_tile(self):
+        words = [await self.rd("RESULT") for _ in range(self.g.tile_beats)]
+        return np.array(self.g.unpack_results(words),
+                        np.int64).reshape(self.g.n, self.g.n)
+
+    async def run_chained(self, dst, tiles, batch=1):
+        g = self.g
+        rest = tiles - 1                    # the weights job carries tile 0
+        assert rest % batch == 0, f"{rest} tiles after the first is not a multiple of {batch}"
+        await self.wr("CTRL", self.ctrl("EN"))
+        await self.wr("DST_ADDR", dst)
+        await self.wr("SRC_ADDR", SRC_BASE)
+        await self.wr("LEN", g.weights_job)
+        await self.wr("NJOBS", rest // batch)
+        await self.wr("CTRL", self.ctrl("EN", "LOAD_W", "AUTO_ST"))
+        t0 = self.cycles()
+        await self.wr("CTRL", self.ctrl("EN", "LOAD_W", "AUTO_ST", "GO"))
+
+        await self._poll(
+            lambda s: self._bit(s, "W_VALID") and not self._bit(s, "CTRL_BUSY"),
+            "weights job to retire", 500)
+        await self.wr("SRC_ADDR", SRC_BASE + g.weights_job * 4)
+        await self.wr("LEN", batch * g.tile_words)
+        await self.wr("CTRL", self.ctrl("EN", "AUTO_ST", "AUTO_FILL"))
+        await self.wait_tiles(tiles)
+        return self.cycles() - t0
+
+    async def run_cpu(self, b, a, dst):
+        """The un-chained baseline: CPU sequences every fill and every store."""
+        g = self.g
+        for i, tile in enumerate(a):
+            await self.wait_idle()
+            self.mem.clear()
+            self.load(SRC_BASE, g.pack(b) + g.pack(tile) if i == 0 else g.pack(tile))
+            await self.job(words=g.weights_job if i == 0 else g.tile_words,
+                           load_w=(i == 0))
+            await self.wait_level(g.n)   # one tile == n result rows
+            await self.wr("DST_ADDR", dst + i * g.tile_bytes)
+            await self.wr("CTRL", self.ctrl("EN", "STORE"))
+            await self.wr("CTRL", self.ctrl("EN"))
+            await self.wait_wdma()
+
+
+def check_tiles(acc, a, b, dst, label):
+    for i, tile in enumerate(a):
+        got, exp = acc.tile_at(dst + i * acc.g.tile_bytes), acc.g.golden(tile, b)
+        assert (got == exp).all(), f"{label} tile {i}\ngot\n{got}\nexp\n{exp}"
+
+
 
 @cocotb.test()
 async def test_matmul(dut):
-	rng = np.random.default_rng(1)
-	acc = await Accel.new(dut)
-	b, a, _ = stream(rng, tiles=2)
+    acc = await Accel.new(dut)
+    g = acc.g
+    b, a, _ = g.stream(np.random.default_rng(1), tiles=2)
 
-	acc.load(SRC_BASE, pack(b) + pack(a[0]))
-	await acc.job(words=2 * N, load_w=True)
-	await acc.wait_idle()
-	got = await acc.pop_tile()
-	assert (got == golden(a[0], b)).all(), f"load_w tile\ngot\n{got}\nexp\n{golden(a[0], b)}"
+    acc.load(SRC_BASE, g.pack(b) + g.pack(a[0]))
+    await acc.job(words=g.weights_job, load_w=True)
+    await acc.wait_idle()
+    got, exp = await acc.pop_tile(), g.golden(a[0], b)
+    assert (got == exp).all(), f"load_w tile\ngot\n{got}\nexp\n{exp}"
 
-	acc.mem.clear()
-	acc.load(SRC_BASE, pack(a[1]))
-	await acc.job(words=N, load_w=False)
-	await acc.wait_idle()
-	got = await acc.pop_tile()
-	assert (got == golden(a[1], b)).all(), f"reuse tile\ngot\n{got}\nexp\n{golden(a[1], b)}"
+    acc.mem.clear()
+    acc.load(SRC_BASE, g.pack(a[1]))
+    await acc.job(words=g.tile_words, load_w=False)
+    await acc.wait_idle()
+    got, exp = await acc.pop_tile(), g.golden(a[1], b)
+    assert (got == exp).all(), f"reuse tile\ngot\n{got}\nexp\n{exp}"
 
 
 @cocotb.test()
 async def test_extremes(dut):
-	acc = await Accel.new(dut)
-	b = np.full((N, N), -128, np.int8)
-	a = np.full((N, N), -128, np.int8)
-	acc.load(SRC_BASE, pack(b) + pack(a))
-	await acc.job(words=2 * N, load_w=True)
-	await acc.wait_idle()
-	got = await acc.pop_tile()
-	assert (got == golden(a, b)).all(), f"extremes\ngot\n{got}\nexp\n{golden(a, b)}"
+    acc = await Accel.new(dut)
+    g = acc.g
+    b = a = g.extreme()
+    acc.load(SRC_BASE, g.pack(b) + g.pack(a))
+    await acc.job(words=g.weights_job, load_w=True)
+    await acc.wait_idle()
+    exp = g.golden(a, b)
+    assert exp.max() < (1 << (g.result_w - 1)), "result width too narrow for extremes"
+    assert exp.max() >= (1 << (g.result_w - 2)), "extremes no longer exercise the top bit"
+
+    got = await acc.pop_tile()
+    assert (got == exp).all(), f"extremes\ngot\n{got}\nexp\n{exp}"
+
+
+@cocotb.test()
+async def test_bad_descriptor(dut):
+    acc = await Accel.new(dut)
+    g = acc.g
+
+    await acc.job(words=0, load_w=True)
+    await ClockCycles(dut.clk, 20)
+    s = await acc.status()
+    assert acc._bit(s, "DMA_ERR"), f"zero-length job did not flag DMA_ERR: 0x{s:08x}"
+
+    b, a, _ = g.stream(np.random.default_rng(11), tiles=1)
+    acc.load(SRC_BASE, g.pack(b) + g.pack(a[0]))
+    await acc.job(words=g.weights_job, load_w=True)
+    await acc.wait_idle()
+    got, exp = await acc.pop_tile(), g.golden(a[0], b)
+    assert (got == exp).all(), f"recovery tile\ngot\n{got}\nexp\n{exp}"
 
 
 @cocotb.test()
 async def test_stream(dut):
-	rng = np.random.default_rng(2)
-	acc = await Accel.new(dut)
-	tiles = 40
-	b, a, words = stream(rng, tiles)
-	acc.load(SRC_BASE, words)
+    acc = await Accel.new(dut)
+    g = acc.g
+    tiles = 40
+    b, a, words = g.stream(np.random.default_rng(2), tiles)
+    acc.load(SRC_BASE, words)
 
-	cyc = await acc.run_chained(DST_BASE, tiles)
-	for i, tile in enumerate(a):
-		got = acc.tile_at(DST_BASE + i * N * N * 4)
-		assert (got == golden(tile, b)).all(), f"tile {i}\ngot\n{got}\nexp\n{golden(tile, b)}"
-	dut._log.info(f"{tiles} chained tiles: {cyc:.0f} cycles, {cyc/tiles:.1f}/tile")
+    cyc = await acc.run_chained(DST_BASE, tiles)
+    check_tiles(acc, a, b, DST_BASE, "chained")
+    dut._log.info(f"{tiles} chained tiles: {cyc:.0f} cycles, {cyc / tiles:.1f}/tile")
 
 
 @cocotb.test()
 async def test_batched_fill(dut):
-	rng = np.random.default_rng(5)
-	acc = await Accel.new(dut)
-	tiles = 7
-	b, a, words = stream(rng, tiles)
-	acc.load(SRC_BASE, words)
+    acc = await Accel.new(dut)
+    g = acc.g
+    tiles = 7
+    b, a, words = g.stream(np.random.default_rng(5), tiles)
+    acc.load(SRC_BASE, words)
 
-	await acc.wr(CTRL, EN)
-	await acc.wr(DST, DST_BASE)
-	await acc.wr(SRC, SRC_BASE)
-	await acc.wr(LEN, len(words))
-	await acc.wr(CTRL, EN | AUTO_ST)
-	t0 = acc.cycles()
-	await acc.wr(CTRL, EN | AUTO_ST | GO)
-	await acc.wait_tiles(tiles)
-	cyc = acc.cycles() - t0
+    await acc.wr("CTRL", acc.ctrl("EN"))
+    await acc.wr("DST_ADDR", DST_BASE)
+    await acc.wr("SRC_ADDR", SRC_BASE)
+    await acc.wr("LEN", len(words))
+    await acc.wr("CTRL", acc.ctrl("EN", "AUTO_ST"))
+    t0 = acc.cycles()
+    await acc.wr("CTRL", acc.ctrl("EN", "AUTO_ST", "GO"))
+    await acc.wait_tiles(tiles)
+    cyc = acc.cycles() - t0
 
-	for i, tile in enumerate(a):
-		got = acc.tile_at(DST_BASE + i * N * N * 4)
-		assert (got == golden(tile, b)).all(), f"tile {i}\ngot\n{got}\nexp\n{golden(tile, b)}"
-	dut._log.info(f"{tiles} tiles from one {len(words)}-word fill: {cyc:.0f} cycles, {cyc/tiles:.1f}/tile")
+    check_tiles(acc, a, b, DST_BASE, "batched")
+    dut._log.info(f"{tiles} tiles from one {len(words)}-word fill: " f"{cyc:.0f} cycles, {cyc / tiles:.1f}/tile")
 
 
 @cocotb.test()
 async def test_speedup(dut):
-	rng = np.random.default_rng(3)
-	acc = await Accel.new(dut)
-	tiles = 8
-	b, a, words = stream(rng, tiles)
+    """Chaining must beat CPU-sequenced operation by more than 2x."""
+    acc = await Accel.new(dut)
+    g = acc.g
+    tiles = 8
+    b, a, words = g.stream(np.random.default_rng(3), tiles)
 
-	cpu = acc.cycles()
-	await acc.run_cpu(b, a, DST_BASE)
-	cpu = (acc.cycles() - cpu) / tiles
+    t0 = acc.cycles()
+    await acc.run_cpu(b, a, DST_BASE)
+    cpu = (acc.cycles() - t0) / tiles
 
-	await acc.reset()
-	acc.mem.clear()
-	acc.wmem.clear()
-	acc.load(SRC_BASE, words)
-	chained = await acc.run_chained(0x8000, tiles) / tiles
-	for i, tile in enumerate(a):
-		got = acc.tile_at(0x8000 + i * N * N * 4)
-		assert (got == golden(tile, b)).all(), f"tile {i}\ngot\n{got}\nexp\n{golden(tile, b)}"
+    await acc.reset()
+    acc.mem.clear()
+    acc.wmem.clear()
+    acc.load(SRC_BASE, words)
+    chained = await acc.run_chained(ALT_DST, tiles) / tiles
+    check_tiles(acc, a, b, ALT_DST, "speedup")
 
-	dut._log.info(f"cpu-sequenced {cpu:.1f} cyc/tile, chained {chained:.1f} cyc/tile, " f"{cpu/chained:.2f}x")
-	assert chained < cpu / 2, f"chain regressed: {cpu:.1f} -> {chained:.1f} cyc/tile"
+    dut._log.info(f"cpu-sequenced {cpu:.1f} cyc/tile, chained {chained:.1f} cyc/tile, " f"{cpu / chained:.2f}x")
+    assert chained < cpu / 2, f"chain regressed: {cpu:.1f} -> {chained:.1f} cyc/tile"
 
 
 if __name__ == "__main__":
-	from cocotb_tools.runner import get_runner
+    from cocotb_tools.runner import get_runner
 
-	sources = sorted((ROOT / "rtl").glob("*.sv")) + sorted((ROOT / "rtl").glob("*.v"))
-	if not sources:
-		sys.exit(f"no rtl sources under {ROOT / 'rtl'}")
-	runner = get_runner("icarus")
-	kw = dict(hdl_toplevel="top", build_dir=ROOT / "build" / "cocotb",
-			  timescale=("1ps", "1ps"), waves=True)
-	runner.build(sources=sources, build_args=["-g2012"], always=True, **kw)
-	runner.test(test_module="test_top", test_dir=ROOT / "tb", **kw)
+    sources = rtl_sources()
+    if not sources:
+        sys.exit(f"no rtl sources under {RTL}")
+    runner = get_runner("icarus")
+    kw = dict(hdl_toplevel="top", build_dir=ROOT / "build" / "cocotb",
+              timescale=("1ps", "1ps"), waves=True)
+    runner.build(sources=sources, build_args=["-g2012"], always=True, **kw)
+    runner.test(test_module="test_top", test_dir=ROOT / "tb", **kw)
