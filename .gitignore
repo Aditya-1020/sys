@@ -38,3 +38,5 @@ sram/
 scripts/build_*
 scripts/stapath*
 scripts/stadebug*
+scripts/lib
+scripts/probes
