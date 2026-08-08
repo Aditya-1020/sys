@@ -14,6 +14,7 @@ V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 
 PDK_ROOT ?= $(HOME)/eda/.volare
 LIB_DIR ?= $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/lib
+MAGIC_RCFILE ?= $(PDK_ROOT)/sky130A/libs.tech/magic/sky130A.magicrc
 FULL_LIB := $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
 TRIM_LIB := $(BUILD_DIR)/sky130_fd_sc_hd__tt_025C_1v80.trimmed.lib
 
@@ -25,6 +26,7 @@ SRAM_CORNERS := tt_025C_1v80 ss_100C_1v60 ff_n40C_1v95
 SRAM_LIBS := $(patsubst %,$(SRAM_BUILD)/$(SRAM_DIR)_%.lib,$(SRAM_CORNERS))
 SRAM_LEF_OUT := $(SRAM_BUILD)/$(SRAM_DIR).lef
 SRAM_GDS_OUT := $(SRAM_BUILD)/$(SRAM_DIR).gds
+SRAM_MAGLEF := $(SRAM_DIR)/$(SRAM_DIR).mag
 
 TT_SYNTH_LIB := $(TRIM_LIB)
 TT_STA_LIB := $(FULL_LIB)
@@ -38,7 +40,7 @@ SYNTH_TOP ?= systolic_array
 SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
 STA_TOP ?= pe
 
-.PHONY: all venv cocotb vectors waves sv2v_rtl synth sta sta-shell lint sram liblane lib-last_run report clean
+.PHONY: all venv cocotb prof vectors waves sv2v_rtl synth sta sta-shell sta-probe lint sram liblane lib-last_run report clean
 
 all: cocotb
 
@@ -57,6 +59,12 @@ sv2v_rtl: $(V_RTL)
 
 cocotb: $(SV_RTL) $(V_MODELS)
 	$(PYTHON) $(TB_DIR)/test_top.py
+
+# throughput gate for perf checks PROF_TILES=N for a longer run.
+PROF_TILES ?=
+PROF_BATCH ?=
+prof: $(SV_RTL) $(V_MODELS)
+	$(if $(PROF_TILES),PROF_TILES=$(PROF_TILES) ,)$(if $(PROF_BATCH),PROF_BATCH=$(PROF_BATCH) ,)$(PYTHON) $(TB_DIR)/prof.py
 
 $(VECTORS) &: $(TB_DIR)/test_top.py
 	$(PYTHON) $(TB_DIR)/test_top.py --gen
@@ -89,6 +97,12 @@ sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$
 sta-shell:
 	scripts/stadebug $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(GUI),--gui,)
 
+# PROBES=<file> POSTPNR=1 SAVE=<tag> CHECK=1
+# sta-probe:
+# 	scripts/stapath -f $(PROBES) \
+# 		$(if $(POSTPNR),--run $(RUN),) $(if $(CORNER),--corner $(CORNER),) \
+# 		$(if $(SAVE),--save $(SAVE),) $(if $(CHECK),--check,) $(STAPATH_ARGS)
+
 $(SRAM_LIBS) $(SRAM_LEF_OUT) &: $(wildcard $(SRAM_DIR)/*.lib) $(SRAM_LEF) scripts/build_sram_macro.py | $(BUILD_DIR)
 	python3 scripts/build_sram_macro.py --src $(SRAM_DIR) --out $(SRAM_BUILD)
 
@@ -96,7 +110,11 @@ $(SRAM_GDS_OUT): $(SRAM_GDS) $(SRAM_LEF) scripts/patch_sram_gds.py | $(BUILD_DIR
 	klayout -b -r scripts/patch_sram_gds.py \
 		-rd gds=$(SRAM_GDS) -rd lef=$(SRAM_LEF) -rd out=$@
 
-sram: $(SRAM_LIBS) $(SRAM_LEF_OUT) $(SRAM_GDS_OUT)
+$(SRAM_MAGLEF): $(SRAM_LEF_OUT) scripts/sram_maglef.tcl
+	magic -dnull -noconsole -rcfile $(MAGIC_RCFILE) \
+		scripts/sram_maglef.tcl $(SRAM_LEF_OUT) $(SRAM_DIR)
+
+sram: $(SRAM_LIBS) $(SRAM_LEF_OUT) $(SRAM_GDS_OUT) $(SRAM_MAGLEF)
 
 RUN ?=
 LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
