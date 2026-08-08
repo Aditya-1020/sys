@@ -1,19 +1,7 @@
-#!/usr/bin/env bash
-# stadebug — interactive OpenSTA/OpenROAD session preloaded with a LibreLane run.
-#
-# Reuses LibreLane's own STA machinery (scripts/openroad/common/io.tcl:
-# read_liberty / read_verilog / read_sdc / read_spef / corner setup) instead of
-# rebuilding the session by hand. The per-corner environment is reconstructed
-# from what the STAPostPNR step actually did: the exact file list is parsed out
-# of the step's own sta.log, and the step's saved _env_*.tcl provides the rest.
-#
-# Usage:
-#   scripts/stadebug                          latest run, default corner
-#   scripts/stadebug <run>                    specific run (name under runs/ or path)
-#   scripts/stadebug -c nom_ss_100C_1v60      pick corner
-#   scripts/stadebug -l                       list available corners
-#   scripts/stadebug --gui                    OpenROAD GUI (layout + timing)
 set -euo pipefail
+
+# shellcheck source=lib/librelane_env.sh
+source "$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/lib/librelane_env.sh"
 
 RUN="" CORNER="" GUI=0 LIST=0
 while [[ $# -gt 0 ]]; do
@@ -21,64 +9,26 @@ while [[ $# -gt 0 ]]; do
         -c|--corner) CORNER="$2"; shift 2 ;;
         --gui) GUI=1; shift ;;
         -l|--list-corners) LIST=1; shift ;;
-        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \?//'; exit 0 ;;
+        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \?//'; exit 0 ;;
         -*) echo "error: unknown flag $1 (see --help)" >&2; exit 1 ;;
         *) RUN="$1"; shift ;;
     esac
 done
 
 # --- resolve run / STA step / corner -----------------------------------------
-if [[ -n "$RUN" && -d "$RUN" ]]; then RUN_DIR="$RUN"
-elif [[ -n "$RUN" && -d "runs/$RUN" ]]; then RUN_DIR="runs/$RUN"
-elif [[ -n "$RUN" ]]; then echo "error: run '$RUN' not found" >&2; exit 1
-else RUN_DIR=$(ls -dt runs/*/ | head -1); RUN_DIR=${RUN_DIR%/}
-fi
-
-STA_DIR=$(ls -d "$RUN_DIR"/*-openroad-stapostpnr 2>/dev/null | sort | tail -1 || true)
-[[ -n "$STA_DIR" ]] || { echo "error: no *-openroad-stapostpnr step in $RUN_DIR" >&2; exit 1; }
+RUN_DIR=$(ll_resolve_run "$RUN")
+STA_DIR=$(ll_sta_dir "$RUN_DIR" openroad-stapostpnr)
 
 if [[ $LIST -eq 1 ]]; then
-    basename -a "$STA_DIR"/*/; exit 0
+    ll_list_corners "$STA_DIR"; exit 0
 fi
 
-if [[ -z "$CORNER" ]]; then
-    ANY_ENV=$(ls "$STA_DIR"/*/_env_*.tcl | head -1)
-    CORNER=$(sed -n 's/^set ::env(DEFAULT_CORNER) //p' "$ANY_ENV")
-    CORNER=${CORNER:-nom_tt_025C_1v80}
-fi
-CDIR="$STA_DIR/$CORNER"
-[[ -d "$CDIR" ]] || { echo "error: corner '$CORNER' not in $STA_DIR — available:" >&2
-                      basename -a "$STA_DIR"/*/ >&2; exit 1; }
+[[ -n "$CORNER" ]] || CORNER=$(ll_default_corner "$STA_DIR")
 
-ENV_TCL=$(ls "$CDIR"/_env_*.tcl | head -1)
-LOG="$CDIR/sta.log"
-[[ -f "$LOG" ]] || { echo "error: $LOG missing — STA step didn't finish for this corner" >&2; exit 1; }
-
-# --- reconstruct the step's per-corner environment from its log --------------
-LIBS=$(sed -n "s/^Reading cell library for the '.*' corner at '\(.*\)'…$/\1/p" "$LOG" | tr '\n' ' ')
-MACRO_NLS=$(sed -n "s/^Reading macro netlist at '\(.*\)'…$/\1/p" "$LOG" | tr '\n' ' ')
-SDC=$(sed -n "s/^Reading design constraints file at '\(.*\)'…$/\1/p" "$LOG" | head -1)
-SPEF=$(sed -n "s/^Reading top-level design parasitics for the '.*' corner at '\(.*\)'…$/\1/p" "$LOG" | head -1)
-INST_SPEFS=$(sed -n "s/^Reading '\(.*\)' parasitics for the '.*' corner at '\(.*\)'…$/{\1 \2}/p" "$LOG" | tr '\n' ' ')
-
-[[ -n "$LIBS" ]] || { echo "error: couldn't parse liberty reads from $LOG" >&2; exit 1; }
-[[ -n "$SDC" ]] || { echo "error: couldn't parse SDC read from $LOG" >&2; exit 1; }
-
-# librelane's scripts dir, taken from the exact binary invocation of the step
-SCRIPTS_DIR=$(sed -n 's|^sta .* \(/.*\)/openroad/sta/corner\.tcl$|\1|p' "$STA_DIR/COMMANDS" | head -1)
-if [[ -z "$SCRIPTS_DIR" ]]; then
-    SCRIPTS_DIR=$(python3 -c "import librelane, os; print(os.path.join(os.path.dirname(librelane.__file__), 'scripts'))")
-fi
-
-export SCRIPTS_DIR
-export _TCL_ENV_IN="$ENV_TCL"
-export _CURRENT_CORNER_NAME="$CORNER"
-export _CURRENT_CORNER_LIBS="${LIBS% }"
-export _CURRENT_CORNER_NETLISTS="${MACRO_NLS% }"
-export _SDC_IN="$SDC"
-[[ -n "$SPEF" ]] && export _CURRENT_SPEF_BY_CORNER="$SPEF"
-[[ -n "$INST_SPEFS" ]] && export _CURRENT_CORNER_SPEFS="${INST_SPEFS% }"
-export _LIB_CORNER_0="$CORNER ${LIBS% }"   # for read_pnr_libs in --gui mode
+# reconstructs the step's per-corner environment from its own sta.log
+ll_export_env "$STA_DIR" "$CORNER"
+SDC="$LL_SDC"
+SPEF="$LL_SPEF"
 
 LOADER="$(cd "$(dirname "$0")" && pwd)/stadebug.tcl"
 
