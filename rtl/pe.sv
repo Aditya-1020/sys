@@ -38,6 +38,8 @@ module pe #(
 	always_ff @(posedge clk) begin
 		if (i_w_load) begin
 			w_r <= i_b;
+		end else begin
+			w_r <= w_r;
 		end
 	end
 
@@ -53,6 +55,8 @@ module pe #(
 	always_ff @(posedge clk) begin
 		if (i_enable) begin
 			accumulator <= next_acc;
+		end else begin
+			accumulator <= accumulator;
 		end
 	end
 
