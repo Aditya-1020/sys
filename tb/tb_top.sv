@@ -71,14 +71,8 @@ module tb_top;
 	wire o_s_axil_rvalid;
 	logic i_s_axil_rready;
 
-	wire [3:0] o_m_axi_arid;
 	wire [31:0] o_m_axi_araddr;
 	wire [7:0] o_m_axi_arlen;
-	wire [2:0] o_m_axi_arsize;
-	wire [1:0] o_m_axi_arburst;
-	wire o_m_axi_arlock;
-	wire [3:0] o_m_axi_arcache;
-	wire [2:0] o_m_axi_arprot;
 	wire o_m_axi_arvalid;
 	logic i_m_axi_arready;
 	logic [31:0] i_m_axi_rdata;
@@ -87,18 +81,10 @@ module tb_top;
 	logic i_m_axi_rvalid;
 	wire o_m_axi_rready;
 
-	wire [3:0] o_m_axi_awid;
 	wire [31:0] o_m_axi_awaddr;
-	wire [7:0] o_m_axi_awlen;
-	wire [2:0] o_m_axi_awsize;
-	wire [1:0] o_m_axi_awburst;
-	wire o_m_axi_awlock;
-	wire [3:0] o_m_axi_awcache;
-	wire [2:0] o_m_axi_awprot;
 	wire o_m_axi_awvalid;
 	logic i_m_axi_awready;
 	wire [31:0] o_m_axi_wdata;
-	wire [3:0] o_m_axi_wstrb;
 	wire o_m_axi_wlast;
 	wire o_m_axi_wvalid;
 	logic i_m_axi_wready;
@@ -133,14 +119,8 @@ module tb_top;
 		.o_s_axil_rvalid(o_s_axil_rvalid),
 		.i_s_axil_rready(i_s_axil_rready),
 
-		.o_m_axi_arid(o_m_axi_arid),
 		.o_m_axi_araddr(o_m_axi_araddr),
 		.o_m_axi_arlen(o_m_axi_arlen),
-		.o_m_axi_arsize(o_m_axi_arsize),
-		.o_m_axi_arburst(o_m_axi_arburst),
-		.o_m_axi_arlock(o_m_axi_arlock),
-		.o_m_axi_arcache(o_m_axi_arcache),
-		.o_m_axi_arprot(o_m_axi_arprot),
 		.o_m_axi_arvalid(o_m_axi_arvalid),
 		.i_m_axi_arready(i_m_axi_arready),
 		.i_m_axi_rdata(i_m_axi_rdata),
@@ -149,18 +129,10 @@ module tb_top;
 		.i_m_axi_rvalid(i_m_axi_rvalid),
 		.o_m_axi_rready(o_m_axi_rready),
 
-		.o_m_axi_awid(o_m_axi_awid),
 		.o_m_axi_awaddr(o_m_axi_awaddr),
-		.o_m_axi_awlen(o_m_axi_awlen),
-		.o_m_axi_awsize(o_m_axi_awsize),
-		.o_m_axi_awburst(o_m_axi_awburst),
-		.o_m_axi_awlock(o_m_axi_awlock),
-		.o_m_axi_awcache(o_m_axi_awcache),
-		.o_m_axi_awprot(o_m_axi_awprot),
 		.o_m_axi_awvalid(o_m_axi_awvalid),
 		.i_m_axi_awready(i_m_axi_awready),
 		.o_m_axi_wdata(o_m_axi_wdata),
-		.o_m_axi_wstrb(o_m_axi_wstrb),
 		.o_m_axi_wlast(o_m_axi_wlast),
 		.o_m_axi_wvalid(o_m_axi_wvalid),
 		.i_m_axi_wready(i_m_axi_wready),
@@ -294,7 +266,7 @@ module tb_top;
 				WS_IDLE: begin
 					if (o_m_axi_awvalid && i_m_axi_awready) begin
 						ws_addr <= o_m_axi_awaddr;
-						ws_beats <= int'(o_m_axi_awlen) + 1;
+						ws_beats <= TILE_BEATS; // store bursts fixed len
 						ws_idx <= 0;
 						i_m_axi_awready <= 1'b0;
 						i_m_axi_wready <= 1'b1;
@@ -305,8 +277,7 @@ module tb_top;
 					if (o_m_axi_wvalid && i_m_axi_wready) begin
 						mem[mem_idx(ws_addr + 32'(4 * ws_idx))] <= o_m_axi_wdata;
 						if ((o_m_axi_wlast === 1'b1) != (ws_idx == (ws_beats - 1)))
-							fail($sformatf("wlast=%b at beat %0d of %0d", o_m_axi_wlast,
-							               ws_idx, ws_beats));
+							fail($sformatf("wlast=%b at beat %0d of %0d", o_m_axi_wlast, ws_idx, ws_beats));
 						if (ws_idx == (ws_beats - 1)) begin
 							i_m_axi_wready <= 1'b0;
 							i_m_axi_bvalid <= 1'b1;
@@ -334,22 +305,10 @@ module tb_top;
 			prev_cs_array <= 1'b0;
 			prev_ovf <= 1'b0;
 		end else begin
-			
-			if (o_m_axi_arvalid) begin
-				if (o_m_axi_arsize !== 3'b010) fail("arsize is not 4 bytes/beat");
-				if (o_m_axi_arburst !== 2'b01) fail("arburst is not INCR");
-			end
-			
-			if (o_m_axi_awvalid) begin
-				if (o_m_axi_awlen !== 8'(TILE_BEATS - 1))
-					fail($sformatf("awlen=%0d, expected %0d", o_m_axi_awlen, TILE_BEATS - 1));
-				if (o_m_axi_awsize !== 3'b010) fail("awsize is not 4 bytes/beat");
-				if (o_m_axi_awburst !== 2'b01) fail("awburst is not INCR");
-				if (o_m_axi_awaddr[1:0] !== 2'b00) fail("awaddr is not word aligned");
-			end
-			
-			if (o_m_axi_wvalid && i_m_axi_wready && (o_m_axi_wstrb !== 4'hF))
-				fail($sformatf("wstrb=%h, expected a full word", o_m_axi_wstrb));
+			if (o_m_axi_arvalid && (o_m_axi_araddr[1:0] !== 2'b00))
+				fail("araddr is not word aligned");
+			if (o_m_axi_awvalid && (o_m_axi_awaddr[1:0] !== 2'b00))
+				fail("awaddr is not word aligned");
 
 			if (dut.u_sram.i_swap && (dut.u_sram.i_cs_array || prev_cs_array))
 				fail("i_swap collided with an array read");

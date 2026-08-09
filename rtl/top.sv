@@ -3,9 +3,7 @@
 
 module top #(
 	parameter integer AXI_ADDR_W = 32,
-	parameter integer AXI_DATA_W = 32,
-
-	localparam integer AXI_ID_W = 4 // both engines tie their ID to 0
+	parameter integer AXI_DATA_W = 32
 )(
 	input wire clk,
 	input wire rstn,
@@ -30,14 +28,8 @@ module top #(
 	input wire i_s_axil_rready,
 
 	// axi master read
-	output wire [AXI_ID_W-1:0] o_m_axi_arid,
 	output wire [AXI_ADDR_W-1:0] o_m_axi_araddr,
 	output wire [7:0] o_m_axi_arlen,
-	output wire [2:0] o_m_axi_arsize,
-	output wire [1:0] o_m_axi_arburst,
-	output wire o_m_axi_arlock,
-	output wire [3:0] o_m_axi_arcache,
-	output wire [2:0] o_m_axi_arprot,
 	output wire o_m_axi_arvalid,
 	input wire i_m_axi_arready,
 
@@ -48,19 +40,11 @@ module top #(
 	output wire o_m_axi_rready,
 
 	// axi master write (result store)
-	output wire [AXI_ID_W-1:0] o_m_axi_awid,
 	output wire [AXI_ADDR_W-1:0] o_m_axi_awaddr,
-	output wire [7:0] o_m_axi_awlen,
-	output wire [2:0] o_m_axi_awsize,
-	output wire [1:0] o_m_axi_awburst,
-	output wire o_m_axi_awlock,
-	output wire [3:0] o_m_axi_awcache,
-	output wire [2:0] o_m_axi_awprot,
 	output wire o_m_axi_awvalid,
 	input wire i_m_axi_awready,
 
 	output wire [AXI_DATA_W-1:0] o_m_axi_wdata,
-	output wire [3:0] o_m_axi_wstrb,
 	output wire o_m_axi_wlast,
 	output wire o_m_axi_wvalid,
 	input wire i_m_axi_wready,
@@ -109,10 +93,6 @@ module top #(
 	localparam integer LEVEL_W = $clog2((RES_JOBS * MATRIX_SIZE) + 1);
 	localparam integer ST_LEVEL_LSB = 16;
 	localparam integer ST_TILE_LSB = ST_LEVEL_LSB + LEVEL_W; // 21
-
-	// normal accesses only; neither dma engine carries the lock bit
-	assign o_m_axi_arlock = 1'b0;
-	assign o_m_axi_awlock = 1'b0;
 
 	wire resetn_synced;
 	reset_sync_2ff u_rsync (
@@ -299,7 +279,6 @@ module top #(
 
 	axi4_dma_wr #(
 		.AXI_ADDR_W (AXI_ADDR_W),
-		.AXI_ID_W   (AXI_ID_W),
 		.BEATS      (TILE_BEATS)
 	) u_wdma (
 		.clk          (clk),
@@ -311,17 +290,10 @@ module top #(
 		.o_last_beat  (wdma_last_beat),
 		.o_done       (wdma_done),
 		.o_err        (wdma_err),
-		.o_m_awid     (o_m_axi_awid),
 		.o_m_awaddr   (o_m_axi_awaddr),
-		.o_m_awlen    (o_m_axi_awlen),
-		.o_m_awsize   (o_m_axi_awsize),
-		.o_m_awburst  (o_m_axi_awburst),
-		.o_m_awcache  (o_m_axi_awcache),
-		.o_m_awprot   (o_m_axi_awprot),
 		.o_m_awvalid  (o_m_axi_awvalid),
 		.i_m_awready  (i_m_axi_awready),
 		.o_m_wdata    (o_m_axi_wdata),
-		.o_m_wstrb    (o_m_axi_wstrb),
 		.o_m_wlast    (o_m_axi_wlast),
 		.o_m_wvalid   (o_m_axi_wvalid),
 		.i_m_wready   (i_m_axi_wready),
@@ -335,7 +307,6 @@ module top #(
 
 	axi4_dma #(
 		.AXI_ADDR_W  (AXI_ADDR_W),
-		.AXI_ID_W    (AXI_ID_W),
 		.SRAM_ADDR_W (SRAM_ADDR_W)
 	 ) u_dma (
 		.clk         (clk),
@@ -346,13 +317,8 @@ module top #(
 		.o_busy      (dma_busy),
 		.o_done      (dma_done),
 		.o_err       (dma_err),
-		.o_m_arid    (o_m_axi_arid),
 		.o_m_araddr  (o_m_axi_araddr),
 		.o_m_arlen   (o_m_axi_arlen),
-		.o_m_arsize  (o_m_axi_arsize),
-		.o_m_arburst (o_m_axi_arburst),
-		.o_m_arcache (o_m_axi_arcache),
-		.o_m_arprot  (o_m_axi_arprot),
 		.o_m_arvalid (o_m_axi_arvalid),
 		.i_m_arready (i_m_axi_arready),
 		.i_m_rdata   (i_m_axi_rdata),

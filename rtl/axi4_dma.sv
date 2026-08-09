@@ -5,7 +5,6 @@
 module axi4_dma #(
 	parameter integer ROW_W = 32,
 	parameter integer AXI_ADDR_W = 32,
-	parameter integer AXI_ID_W = 1, // single outstanding txn, ID always 0
 	parameter integer SRAM_ADDR_W = 6,
 
 	parameter integer AXI_DATA_W = ROW_W, // must eq ROW_W
@@ -25,13 +24,8 @@ module axi4_dma #(
 	output wire o_err, // sticky
 
 	// axi master read, fetch
-	output wire [AXI_ID_W-1:0]  o_m_arid,
 	output wire [AXI_ADDR_W-1:0] o_m_araddr,
 	output wire [7:0] o_m_arlen,
-	output wire [2:0] o_m_arsize,
-	output wire [1:0] o_m_arburst,
-	output wire [3:0] o_m_arcache,
-	output wire [2:0] o_m_arprot,
 	output wire o_m_arvalid,
 	input wire i_m_arready,
 
@@ -53,11 +47,6 @@ module axi4_dma #(
 	output wire o_fill_done,
 	input wire i_array_done
 );
-	assign o_m_arid = '0; // single master; one outstanding transaction
-	assign o_m_arsize = 3'b010; // 4 bytes per beat
-	assign o_m_arburst = 2'b01; // INCR
-	assign o_m_arcache = 4'b0011;
-	assign o_m_arprot = 3'b000;
 	assign o_dma_we = 1'b1;
 	assign o_dma_mask = 4'hF; // full row
 	assign o_dma_wdata = i_m_rdata;

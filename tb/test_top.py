@@ -241,8 +241,7 @@ class Accel:
 
     def tile_at(self, addr):
         words = [self.wmem[addr + 4 * i] for i in range(self.g.tile_beats)]
-        return np.array(self.g.unpack_results(words),
-                        np.int64).reshape(self.g.n, self.g.n)
+        return np.array(self.g.unpack_results(words), np.int64).reshape(self.g.n, self.g.n)
 
     async def wr(self, reg, data):
         d = self.dut
@@ -311,7 +310,7 @@ class Accel:
             while not d.o_m_axi_awvalid.value:
                 await RisingEdge(d.clk)
             addr = int(d.o_m_axi_awaddr.value)
-            beats = int(d.o_m_axi_awlen.value) + 1
+            beats = self.g.tile_beats  # awlen is a wrapper tie, not a dut pin
             d.i_m_axi_awready.value = 1
             await RisingEdge(d.clk)
             d.i_m_axi_awready.value = 0
@@ -412,14 +411,12 @@ class Accel:
         return self.cycles() - t0
 
     async def run_cpu(self, b, a, dst):
-        """The un-chained baseline: CPU sequences every fill and every store."""
         g = self.g
         for i, tile in enumerate(a):
             await self.wait_idle()
             self.mem.clear()
             self.load(SRC_BASE, g.pack(b) + g.pack(tile) if i == 0 else g.pack(tile))
-            await self.job(words=g.weights_job if i == 0 else g.tile_words,
-                           load_w=(i == 0))
+            await self.job(words=g.weights_job if i == 0 else g.tile_words, load_w=(i == 0))
             await self.wait_level(g.n)   # one tile == n result rows
             await self.wr("DST_ADDR", dst + i * g.tile_bytes)
             await self.wr("CTRL", self.ctrl("EN", "STORE"))
@@ -552,7 +549,6 @@ if __name__ == "__main__":
     if not sources:
         sys.exit(f"no rtl sources under {RTL}")
     runner = get_runner("icarus")
-    kw = dict(hdl_toplevel="top", build_dir=ROOT / "build" / "cocotb",
-              timescale=("1ps", "1ps"), waves=True)
+    kw = dict(hdl_toplevel="top", build_dir=ROOT / "build" / "cocotb", timescale=("1ps", "1ps"), waves=True)
     runner.build(sources=sources, build_args=["-g2012"], always=True, **kw)
     runner.test(test_module="test_top", test_dir=ROOT / "tb", **kw)

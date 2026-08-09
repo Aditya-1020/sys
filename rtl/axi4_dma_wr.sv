@@ -5,7 +5,6 @@
 module axi4_dma_wr #(
 	parameter integer ROW_W = 32,
 	parameter integer AXI_ADDR_W = 32,
-	parameter integer AXI_ID_W = 1, // single outstanding txn, ID always 0
 	parameter integer BEATS = 16, // one result matrix
 	parameter integer AXI_DATA_W = ROW_W,
 	localparam integer CNT_W = $clog2(BEATS)
@@ -24,18 +23,11 @@ module axi4_dma_wr #(
 	output wire o_err, // sticky
 
 	// axi master write
-	output wire [AXI_ID_W-1:0] o_m_awid,
 	output wire [AXI_ADDR_W-1:0] o_m_awaddr,
-	output wire [7:0] o_m_awlen,
-	output wire [2:0] o_m_awsize,
-	output wire [1:0] o_m_awburst,
-	output wire [3:0] o_m_awcache,
-	output wire [2:0] o_m_awprot,
 	output wire o_m_awvalid,
 	input wire i_m_awready,
 
 	output wire [AXI_DATA_W-1:0] o_m_wdata,
-	output wire [(AXI_DATA_W/8)-1:0] o_m_wstrb,
 	output wire o_m_wlast,
 	output wire o_m_wvalid,
 	input wire i_m_wready,
@@ -49,19 +41,9 @@ module axi4_dma_wr #(
 	input wire [AXI_DATA_W-1:0] i_fifo_rdata,
 	output wire o_fifo_rd
 );
-	typedef struct packed {
-		logic [AXI_ID_W-1:0] id;
-		logic [AXI_ADDR_W-1:0] addr;
-		logic [7:0] len;
-		logic [2:0] size;
-		logic [1:0] burst;
-		logic [3:0] cache;
-		logic [2:0] prot;
-	} aw_payload_t;
-
+	// payload only rest const
 	typedef struct packed {
 		logic [AXI_DATA_W-1:0] data;
-		logic [(AXI_DATA_W/8)-1:0] strb;
 		logic last;
 	} w_payload_t;
 
@@ -85,20 +67,14 @@ module axi4_dma_wr #(
 	logic w_valid_int, w_ready_int;
 	logic b_valid_int, b_ready_int;
 
-	aw_payload_t aw_data_int, aw_data_out;
+	logic [AXI_ADDR_W-1:0] aw_data_int;
 	w_payload_t w_data_int, w_data_out;
 	b_payload_t b_data_int, b_data_out;
 
-	assign aw_data_int.id = '0; // single master; one outstanding transaction
-	assign aw_data_int.addr = {i_dst_addr[AXI_ADDR_W-1:2], 2'b00};
-	assign aw_data_int.len = 8'(BEATS-1);
-	assign aw_data_int.size = 3'b010; // 4 bytes per beat
-	assign aw_data_int.burst = 2'b01; // INCR
-	assign aw_data_int.cache = 4'b0011;
-	assign aw_data_int.prot = 3'b000;
+	assign aw_data_int = {i_dst_addr[AXI_ADDR_W-1:2], 2'b00};
 
 	skid_buffer #(
-		.N($bits(aw_payload_t))
+		.N(AXI_ADDR_W)
 	) skid_aw (
 		.clk    (clk),
 		.rstn   (rstn),
@@ -107,19 +83,10 @@ module axi4_dma_wr #(
 		.i_ready(i_m_awready),
 		.o_valid(o_m_awvalid),
 		.i_data (aw_data_int),
-		.o_data (aw_data_out)
+		.o_data (o_m_awaddr)
 	);
 
-	assign o_m_awid = aw_data_out.id;
-	assign o_m_awaddr = aw_data_out.addr;
-	assign o_m_awlen = aw_data_out.len;
-	assign o_m_awsize = aw_data_out.size;
-	assign o_m_awburst = aw_data_out.burst;
-	assign o_m_awcache = aw_data_out.cache;
-	assign o_m_awprot  = aw_data_out.prot;
-
 	assign w_data_int.data = i_fifo_rdata;
-	assign w_data_int.strb = '1; // full word
 	assign w_data_int.last = last_cnt;
 
 	skid_buffer #(
@@ -136,7 +103,6 @@ module axi4_dma_wr #(
 	);
 
 	assign o_m_wdata = w_data_out.data;
-	assign o_m_wstrb = w_data_out.strb;
 	assign o_m_wlast = w_data_out.last;
 
 	assign b_data_int.resp = i_m_bresp;
