@@ -1,3 +1,23 @@
+#!/usr/bin/env bash
+# stadebug — interactive OpenSTA/OpenROAD session preloaded with a LibreLane run.
+#
+# Reuses LibreLane's own STA machinery (scripts/openroad/common/io.tcl:
+# read_liberty / read_verilog / read_sdc / read_spef / corner setup) instead of
+# rebuilding the session by hand. The per-corner environment is reconstructed
+# from what the STAPostPNR step actually did: the exact file list is parsed out
+# of the step's own sta.log, and the step's saved _env_*.tcl provides the rest.
+# That reconstruction lives in scripts/lib/librelane_env.sh, shared with
+# scripts/stapath.
+#
+# For batch/repeatable path queries rather than an interactive poke, see
+# scripts/stapath.
+#
+# Usage:
+#   scripts/stadebug                          latest run, default corner
+#   scripts/stadebug <run>                    specific run (name under runs/ or path)
+#   scripts/stadebug -c nom_ss_100C_1v60      pick corner
+#   scripts/stadebug -l                       list available corners
+#   scripts/stadebug --gui                    OpenROAD GUI (layout + timing)
 set -euo pipefail
 
 # shellcheck source=lib/librelane_env.sh
