@@ -17,36 +17,18 @@ module pp_buf_sram (
 	output wire [31:0] o_array_rdata // output to pes
 );
 	wire [31:0] m0_dout, m1_dout;
-	(* keep *) logic [1:0] rst_sync_r;
-	(* keep *) logic [1:0] rst_rel_m0_r;
-	(* keep *) logic [1:0] rst_rel_m1_r;
 
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			rst_sync_r <= 2'b00;
-			rst_rel_m0_r <= 2'b00;
-			rst_rel_m1_r <= 2'b00;
-		end else begin
-			rst_sync_r <= {rst_sync_r[0], 1'b1};
-			rst_rel_m0_r <= {rst_rel_m0_r[0], 1'b1};
-			rst_rel_m1_r <= {rst_rel_m1_r[0], 1'b1};
-		end
-	end
-
-	wire rstn_sync = rst_sync_r[1]; // sync resets for all
-
-	wire m0_rstb = rst_rel_m0_r[0];
-	wire m0_access_en = rst_rel_m0_r[1];
-	wire m1_rstb = rst_rel_m1_r[0];
-	wire m1_access_en = rst_rel_m1_r[1];
+	wire m0_rstb, m0_access_en, m1_rstb, m1_access_en;
+	sram_rst_rel u_rel_m0 (.clk(clk), .rstn(rstn), .o_rstb(m0_rstb), .o_access_en(m0_access_en));
+	sram_rst_rel u_rel_m1 (.clk(clk), .rstn(rstn), .o_rstb(m1_rstb), .o_access_en(m1_access_en));
 
 	(* keep *) logic ping_pong_sel_r;
 	(* keep *) logic ping_pong_sel_m0_r;
 	(* keep *) logic ping_pong_sel_m1_r;
 	logic ping_pong_sel_d1_r;
 
-	always_ff @(posedge clk) begin
-		if (!rstn_sync) begin
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
 			ping_pong_sel_r <= 1'b0;
 			ping_pong_sel_m0_r <= 1'b0;
 			ping_pong_sel_m1_r <= 1'b0;
@@ -56,10 +38,6 @@ module pp_buf_sram (
 				ping_pong_sel_r <= ~ping_pong_sel_r;
 				ping_pong_sel_m0_r <= ~ping_pong_sel_m0_r;
 				ping_pong_sel_m1_r <= ~ping_pong_sel_m1_r;
-			end else begin
-				ping_pong_sel_r <= ping_pong_sel_r;
-				ping_pong_sel_m0_r <= ping_pong_sel_m0_r;
-				ping_pong_sel_m1_r <= ping_pong_sel_m1_r;
 			end
 			ping_pong_sel_d1_r <= ping_pong_sel_r;
 		end
