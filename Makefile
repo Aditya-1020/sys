@@ -40,11 +40,26 @@ SYNTH_TOP ?= systolic_array
 SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
 STA_TOP ?= pe
 
-.PHONY: all venv cocotb prof vectors waves sv2v_rtl synth sta sta-shell sta-probe lint sram liblane lib-last_run report clean
+TB_TOP ?= tb_top
+TB_SRC = $(TB_DIR)/$(TB_TOP).sv
+SIM_MODELS = $(foreach m,$(V_MODELS), $(if $(wildcard $(SRAM_DIR)/$(notdir $(m))),$(SRAM_DIR)/$(notdir $(m)),$(m)))
+
+IVERILOG ?= iverilog
+VVP ?= vvp
+TB_VVP = $(BUILD_DIR)/$(TB_TOP).vvp
+TB_VCD = $(BUILD_DIR)/$(TB_TOP).vcd
+
+XVLOG ?= xvlog
+XELAB ?= xelab
+XSIM ?= xsim
+XSIM_DIR = $(BUILD_DIR)/xsim
+XSIM_SNAP = $(TB_TOP)_snap
+
+.PHONY: all venv cocotb tb xrun prof vectors waves tb-waves xrun-waves sv2v_rtl synth sta sta-shell sta-probe lint sram liblane lib-last_run report clean
 
 all: cocotb
 
-VECTORS = $(TB_DIR)/vectors/stim.hex $(TB_DIR)/vectors/golden.hex
+VECTORS = $(TB_DIR)/vectors/stim.hex $(TB_DIR)/vectors/golden.hex $(TB_DIR)/vectors/tb_params.vh
 
 $(VERILOG_SV2V) $(BUILD_DIR):
 	@mkdir -p $@
@@ -60,7 +75,6 @@ sv2v_rtl: $(V_RTL)
 cocotb: $(SV_RTL) $(V_MODELS)
 	$(PYTHON) $(TB_DIR)/test_top.py
 
-# throughput gate for perf checks PROF_TILES=N for a longer run.
 PROF_TILES ?=
 PROF_BATCH ?=
 prof: $(SV_RTL) $(V_MODELS)
@@ -71,8 +85,27 @@ $(VECTORS) &: $(TB_DIR)/test_top.py
 
 vectors: $(VECTORS)
 
+TB_PLUSARGS = +stim=$(CURDIR)/$(TB_DIR)/vectors/stim.hex +gold=$(CURDIR)/$(TB_DIR)/vectors/golden.hex
+
+$(TB_VVP): $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
+	$(IVERILOG) -g2012 -I$(TB_DIR) -s $(TB_TOP) -o $@ $(SV_RTL) $(SIM_MODELS) $(TB_SRC)
+
+tb: $(TB_VVP)
+	$(VVP) $< +wave=$(TB_VCD) $(TB_PLUSARGS)
+
+xrun: $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
+	@mkdir -p $(XSIM_DIR)
+	cd $(XSIM_DIR) && \
+		$(XVLOG) --sv -i $(CURDIR)/$(TB_DIR) $(addprefix $(CURDIR)/,$(SV_RTL) $(TB_SRC)) && \
+		$(XVLOG) $(addprefix $(CURDIR)/,$(SIM_MODELS)) && \
+		$(XELAB) -debug typical -timescale 1ps/1ps -top $(TB_TOP) -snapshot $(XSIM_SNAP) && \
+		$(XSIM) $(XSIM_SNAP) -runall -testplusarg wave=$(TB_TOP).vcd $(addprefix -testplusarg ,$(subst +,,$(TB_PLUSARGS)))
+
 waves:
 	gtkwave $(BUILD_DIR)/cocotb/top.fst &
+
+xrun-waves:
+	gtkwave $(XSIM_DIR)/$(TB_TOP).vcd &
 
 venv:
 	$(VENV_PYTHON) -m venv .venv
@@ -96,12 +129,6 @@ sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$
 
 sta-shell:
 	scripts/stadebug $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(GUI),--gui,)
-
-# PROBES=<file> POSTPNR=1 SAVE=<tag> CHECK=1
-# sta-probe:
-# 	scripts/stapath -f $(PROBES) \
-# 		$(if $(POSTPNR),--run $(RUN),) $(if $(CORNER),--corner $(CORNER),) \
-# 		$(if $(SAVE),--save $(SAVE),) $(if $(CHECK),--check,) $(STAPATH_ARGS)
 
 $(SRAM_LIBS) $(SRAM_LEF_OUT) &: $(wildcard $(SRAM_DIR)/*.lib) $(SRAM_LEF) scripts/build_sram_macro.py | $(BUILD_DIR)
 	python3 scripts/build_sram_macro.py --src $(SRAM_DIR) --out $(SRAM_BUILD)
@@ -135,4 +162,4 @@ report:
 
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) tb/__pycache__ tb/*.xml
-	rm -f *.log
+	rm -rf *.log *.vcd *.fst
