@@ -5,3 +5,5 @@ set_clock_uncertainty -hold  0.10 [get_clocks SYS_CLK]
 
 set_timing_derate -early 0.98
 set_timing_derate -late  1.02
+
+set_max_transition 0.85 [current_design]
