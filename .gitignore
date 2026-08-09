@@ -37,6 +37,7 @@ no-sram/
 sram/
 scripts/build_*
 scripts/stapath*
-scripts/stadebug*
+scripts/stadebug
+scripts/stadebug.tcl
 scripts/lib
 scripts/probes
