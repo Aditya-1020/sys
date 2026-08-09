@@ -1,23 +1,18 @@
 # sky130 4×4 int8 systolic matmul accelerator
 
-A weight-stationary 4×4 int8 matrix-multiply accelerator with an SPI slave
-control interface and an SRAM-backed input queue, taken from RTL to a clean
-GDSII on sky130A with LibreLane.
+Weight-stationary 4×4 int8 matrix-multiply accelerator with AXI4-Lite control,
+two AXI4 master DMA ports and a ping-pong SRAM-macro input buffer. RTL to GDSII
+on sky130A with LibreLane.
 
-**Status: closed at 12 ns (83.3 MHz), all nine signoff corners clean.**
+Closed at 10 ns (100 MHz), all nine signoff corners clean (`runs/final`, 2026-08-09).
 
 | Check | Result |
 | --- | --- |
-| Setup violations | **0** — worst slack **+0.232 ns** (`max_ss_100C_1v60`) |
-| Hold violations | **0** — worst slack **+0.197 ns** (`max_ff_n40C_1v95`) |
-| Magic DRC | 0 |
-| KLayout DRC | 0 |
-| Routing DRC (DRT) | 0 |
-| LVS | 0 |
-| Antenna | 0 |
-| PDN | 0 |
-| Illegal overlaps | 0 |
-| Disconnected pins | 0 |
+| Setup | 0 violations, worst slack +0.502 ns (`max_ss_100C_1v60`) |
+| Hold | 0 violations, worst slack +0.145 ns (`max_ff_n40C_1v95`) |
+| Magic / KLayout / routing DRC | 0 / 0 / 0 |
+| LVS, antenna, illegal overlaps, GDS XOR | 0 |
+| Max slew / cap / fanout | 24 / 1 / 2, characterised below |
 
 ---
 
@@ -25,286 +20,249 @@ GDSII on sky130A with LibreLane.
 
 ```
 top
-├── reset_sync_2ff          async-assert / sync-release reset
-├── spi_if                  SPI slave (mode 0), CDC into the core clock
-└── matmul_accel
-    ├── ctrl_unit           CSR block + A-row serialiser + job sequencer
-    ├── in_fifo             16-slot matrix queue, sky130 SRAM macro backed
-    ├── systolic_array      4×4 PE grid + result buffer + result streamer
-    └── out_fifo            16-deep FWFT result FIFO
+├── reset_sync_2ff        async-assert / sync-release reset
+├── axi_lite_csr          AXI4-Lite slave, 7 registers (+ 2× skid_buffer)
+├── axi4_dma              AXI4 master read, operand fetch
+├── axi4_dma_wr           AXI4 master write, result store
+├── pp_buf_sram           ping-pong operand buffer, 2× sram22_64x32m4w8
+│   └── sram_rst_rel      staged reset release for the macros
+├── array_control         job sequencer, tile retire, credit accounting
+├── systolic_array        4×4 PE grid, no FSM
+│   └── pe                2-stage MAC, registered product (PE_LATENCY = 2)
+└── res_cap_fifo          18-bit exact result packer, 9 beats per tile
 ```
 
-The array is weight-stationary: B is loaded into the PEs one lane at a time and
-stays put, A streams in as a wavefront from the left, and partial sums
-accumulate downward. Jobs auto-launch whenever `CTRL.EN` is set and a complete
-matrix is queued; the controller only starts when the array is idle and
-completes on the array's sticky `o_done`.
+B loads into the PEs and stays put, A streams in as a wavefront from the left,
+partial sums accumulate downward. The array has no state machine: every enable
+and result-valid is a tap on one `vld_r` delay line fed by `i_a_valid`.
 
-Each PE is a 2-stage pipeline (`a_r → mult_r → accumulator`, `PE_LATENCY = 2`)
-— the registered product is what keeps the 8×8 multiply off the critical path.
+Reads and writes overlap in steady state, so the three AXI ports stay separate.
+One shared port would need an arbiter and serialise the overlap.
 
-### Memory macro
+Tile results are partial sums, stored as exact 18-bit values. For K larger than
+`MATRIX_SIZE` software accumulates across tiles, so clipping would compound.
+16 × 18b is exactly 9 beats. Never narrow this format; `test_extremes` is the
+only test that catches it.
 
-`sky130_sram_256byte_1rw1r_32x64_8` — 64 words × 32 bit, dual-port (1RW + 1R),
-generated with OpenRAM. Port 0 is the write port, port 1 is the read port. The
-macro is placed manually at `(30, 605)` with a 10 µm halo.
+Memory: `sram22_64x32m4w8` ×2, 64 words × 32 bit, single RW port. Placed at
+(14.88, 446.86) and (382.88, 446.86), orientation N so all met1 pins face south
+into the logic. Deliberately oversized, 8 of the 64 words are reachable.
 
 ---
 
-## SPI protocol
+## Register map
 
-Mode 0, `sclk` up to `clk/2`. A frame is:
+AXI4-Lite, 32-bit, 7 registers.
 
-```
-CS# low → [8 command bits] → [8 turnaround bits, reads only] → [32-bit words…] → CS# high
-```
+| Offset | Name | Access | Notes |
+| --- | --- | --- | --- |
+| `0x00` | CTRL | RW | 6 bits: EN, GO, LOAD_W, STORE, AUTO_ST, AUTO_FILL |
+| `0x04` | STATUS | RO | see below |
+| `0x08` | SRC_ADDR | RW | operand fetch base |
+| `0x0C` | LEN | RW | 7 bits |
+| `0x10` | RESULT | RO | pop-on-read |
+| `0x14` | DST_ADDR | RW | result store base |
+| `0x18` | NJOBS | RW | 16 bits |
 
-Multiple data words may follow one command; `CS#` rising ends the frame.
+STATUS packs `dma_busy/done/err`, `fill_done`, `ctrl_busy`, `array_busy/done`,
+`pp_sel`, `w_valid`, `res_valid`, `res_ovf`, `wdma_busy/done/err`, `af_busy`,
+a FIFO level field and a 4-bit tile counter.
 
-| Command | Meaning |
-| --- | --- |
-| `0x8n` | CSR write, `n[1:0]` selects the register |
-| `0x0n` | CSR read, `n[1:0]` selects the register |
-| `0xA0` | A-matrix write — 4 words = one 4×4 matrix |
-| `0xB0` | B-weight write — 4 words, one per lane (dropped while busy) |
-| `0x40` | C result read — pop-on-read, sign-extended to 32 bit |
+Descriptor registers truncate in hardware: writing `0xFFFFFFFF` to `LEN` reads
+back `0x7F`. Deliberate, and checked by the testbench.
 
-CSR select `n[1:0]`: `0` = CTRL, `1` = STATUS, `2` = IRQ.
-
-| Register | Fields |
-| --- | --- |
-| CTRL | `[0]` EN, `[1]` IRQ_EN |
-| STATUS | `[0]` busy, `[1]` a-empty, `[2]` a-full, `[3]` done, `[4]` res-valid, `[15:8]` a-level, `[23:16]` res-level |
-| IRQ (w1c) | `[0]` job-irq, `[1]` a-overflow |
-
-The CSR bus contract is that `i_en` is a **single-cycle strobe** — the SPI
-bridge guarantees this, and pop-on-read depends on it.
+Software must not read `RESULT` while auto-store is active. Reading it during a
+store returns data without popping.
 
 ---
 
 ## Repo layout
 
 ```
-rtl/            SystemVerilog sources (+ the OpenRAM behavioural model)
-tb/             testbenches
-constraints/    base.sdc + pnr.sdc + signoff.sdc
-scripts/        synth/STA tcl, report generator, STA debug shell, lib filter
-sram_32x64/     generated SRAM macro (gds/lef/lib/spice/v)
-docs/           flow, PD and timing notes kept during bring-up
-config.json     LibreLane configuration
+rtl/                SystemVerilog sources (+ the sram22 behavioural model)
+tb/                 cocotb (test_top.py) + self-contained SV (tb_top.sv)
+constraints/        base.sdc, pnr.sdc, signoff.sdc, pin_order.cfg
+scripts/            macro build, STA debug, PDN and report helpers
+sram22_64x32m4w8/   vendor macro views (committed pre-patched)
+config.json         LibreLane configuration
 ```
 
-`constraints/base.sdc` holds the real clock definition. **`CLOCK_PERIOD` in
-`config.json` only feeds ABC during synthesis** — PnR and signoff read
-`PNR_SDC_FILE` / `SIGNOFF_SDC_FILE`. Keep the two in sync.
+`constraints/base.sdc` holds the real clock. `CLOCK_PERIOD` in `config.json`
+only feeds ABC during synthesis; PnR and signoff read `PNR_SDC_FILE` and
+`SIGNOFF_SDC_FILE`. A commit that moved the clock to 100 MHz once left
+`base.sdc` at 5.0 ns and the design closed silently at 200 MHz.
+
+`set_max_transition` is stage-specific on purpose:
+
+| file | value | why |
+| --- | --- | --- |
+| `base.sdc` | none | comment only |
+| `pnr.sdc` | 0.85 | over-constrain so the resizer keeps working |
+| `signoff.sdc` | 1.50 | the real `sky130_fd_sc_hd` `default_max_transition` |
+
+Relaxing it in `base.sdc` would relax the resizer's target too and produce worse
+real slew.
 
 ---
 
 ## Building
 
-Simulation runs through sv2v → Vivado xsim.
+```sh
+make lint                  # verilator -Wall --timing, RTL stays warning-free
+make cocotb                # primary regression, 6 tests vs a numpy golden model
+make xrun                  # SV bench under Vivado xsim
+make vectors               # regenerate tb/vectors/{stim,golden}.hex
+```
+
+Physical:
 
 ```sh
-make lint                       # verilator -Wall, RTL must stay warning-free
-make xrun TOP=tb_systolic_array # tb_csr, tb_ctrl_unit, tb_in_fifo, tb_sram,
-                                # tb_matmul_accel, tb_top
-make gls                        # gate-level sim against the synth netlist
-make sta STA_TOP=pe             # standalone OpenSTA on a submodule
+make sram                  # build the macro views, required before any PnR run
+make report  RUN=<tag>     # signoff + timing summary
+make sta-shell RUN=<tag> CORNER=max_ss_100C_1v60
+make lib-last_run          # OpenROAD GUI on the last run
+make gl RUN=<tag>          # gate-level sim on that run's netlist
 ```
 
-Physical implementation:
-
-```sh
-make liblane RUN=<tag>          # full RTL→GDSII
-make report  RUN=<tag>          # signoff + timing summary table
-make sta-shell RUN=<tag> CORNER=nom_ss_100C_1v60   # interactive STA on a run
-```
-
-`make liblane` runs LibreLane to KLayout stream-out, strips orphan tops from the
-Magic GDS, then finishes the render.
-
----
-
-## How timing was closed
-
-The clock came down from an optimistic early target to a solid 12 ns. Most of
-the work was structural rather than constraint tweaking.
-
-### 1. Control broadcast (N=2 → N=4)
-
-Scaling the array from 2×2 to 4×4 turned a comfortable design into a badly
-violating one: worst reg-to-reg slack **−18.83 ns**, caused by a single `nor2`
-driving **381 loads** with a 10.3 ns slew. At N=2 the broadcast was small enough
-to hide.
-
-Pipelining the control signals into shift registers so each column gets its own
-registered copy fixed it: **−18.83 → −0.87 ns**.
-
-### 2. Library trimming
-
-The `lpflow_*` and `probe_*` cells were being selected by ABC and were poor
-timing choices. `scripts/filter_lib.py` strips them from the Liberty file before
-synthesis:
-
-- in2reg **−1.04 → −0.390 ns**
-- reg2reg **−0.87 → −0.397 ns**
-
-`EXTRA_EXCLUDED_CELLS` in `config.json` keeps them out of the PnR resizer too,
-along with the delay-buffer and tristate families.
-
-### 3. Operand feed
-
-Deleting the `a_r`/`b_r` shadow registers in `systolic_array` removed 256 flops
-and let the array read `i_ld_a`/`i_ld_b` directly. CSR operand writes are gated
-with `!busy`, since the array reads its operands live during a job. Worst-net
-fanout dropped **381 → 76**, worst slew **15.4 ns → 1.4 ns**, and in2reg went
-**−0.40 → +1.18 ns**.
-
-### 4. Timing evolution
-
-| Stage | tt setup WS | ss setup WS | ff setup WS | #Setup | Hold WS | #Hold |
-| --- | --- | --- | --- | --- | --- | --- |
-| post-synth | 4.926 | 1.881 | 5.136 | 0 | 0.079 | 0 |
-| mid-PnR (placement) | — | 1.881 | — | 2 | 0.063 | 0 |
-| mid-PnR (post-CTS) | — | 1.881 | — | 0 | 0.101 | 0 |
-| mid-PnR (post-GRT) | — | 1.881 | — | 0 | 0.102 | 0 |
-| **post-PnR (extracted)** | **3.863** | **0.232** | **4.307** | **0** | **0.197** | **0** |
-
-Mid-PnR STA runs the default corner only, which is why `tt`/`ff` are blank there.
-
----
-
-## Findings worth keeping
-
-Four issues cost real debugging time and are each easy to walk into again.
-
-### The SDC period was not what the config said
-
-`config.json` had `CLOCK_PERIOD` set to the intended target while
-`constraints/base.sdc` still carried an older, much tighter `SYS_PERIOD`. Because
-`CLOCK_PERIOD` only reaches ABC, synthesis was optimising for one number and
-PnR/signoff were checking against another. Always change the period in the SDC.
-
-### Synthesis and the resizer were only seeing the typical corner
-
-`SYNTH_CORNER` and `PNR_CORNERS` defaulted to `nom_tt` only. At 12 ns the
-typical corner passes almost trivially, so the slow corner — roughly 2.3× tt —
-was never repaired by the resizer and only showed up at signoff. Fixed by
-setting:
-
-```json
-"SYNTH_CORNER":   "nom_ss_100C_1v60",
-"PNR_CORNERS":    ["nom_tt_025C_1v80", "nom_ss_100C_1v60", "nom_ff_n40C_1v95"],
-"DEFAULT_CORNER": "nom_ss_100C_1v60"
-```
-
-### The SRAM launches read data on the falling edge
-
-This was the last blocker, and the interesting one. 26 of the 28 remaining
-violating paths started at the SRAM, worst slack **−1.569 ns**.
-
-The macro's Liberty declares the `dout1` arc as `timing_type : falling_edge`
-(the OpenRAM behavioural model agrees — `always @(negedge clk1)`). Address is
-captured on the rising edge, data is driven on the *following falling* edge. So
-with `clk1` tied to `clk`, the whole `sram → rd_data` path only ever had **half
-a period** — 6 ns of the 12 ns.
-
-It made it through post-synthesis STA at **+1.571 ns** because the resizer was
-working from GRT-estimated parasitics. RC extraction then put ~150 fF on the
-`dout1` nets, which is more than 5× past the last point the `.lib` characterises
-(27.6 fF), so STA extrapolated clk→q out to **5.79 ns** with a 3.1 ns output
-slew. Of a 6 ns budget, 5.79 ns was gone before the signal left the macro.
-
-The fix is to feed port 1 the **inverted** clock:
-
-```systemverilog
-wire clk_rd = ~clk;
-...
-.clk1(clk_rd),
-```
-
-The macro now samples `addr1`/`csb1` on the falling edge of `clk` (they come
-straight off flops, so half a period of setup is ample) and launches `dout1` on
-the rising edge — a full period before `rd_data` captures it. Read latency is
-unchanged; this was verified by diffing `tb_in_fifo` output before and after,
-which is bit-identical every cycle.
-
-Two supporting changes went in alongside it:
-
-- `constraints/pnr.sdc` pins `set_max_capacitance 0.025` on `sram/dout1[*]` so
-  `repair_design` buffers at the macro instead of leaving STA to extrapolate.
-  PnR-only, so signoff still reports real numbers.
-- `RUN_POST_GRT_DESIGN_REPAIR` and `RUN_POST_GRT_RESIZER_TIMING` are enabled.
-  Both default to **off**, which is why nothing was re-optimised once real
-  routing parasitics existed.
-
-Result: **−1.569 → +0.232 ns**, and the SRAM path left the critical list
-entirely. The limiter is now a PE operand-broadcast path, which is the
-design-limited path you would expect.
-
-### GDS XOR is an abstract-view artifact
-
-Magic and KLayout stream the macro differently — Magic streams it abstracted
-from the LEF, KLayout streams the real geometry — so all ~529k XOR differences
-sit inside the macro bounding box. Magic DRC ran against the maglef and flagged
-`nwell.4` rows that do contain taps (verified in the DEF at 25.76 µm pitch) and
-`met4.4a` on what are SRAM LEF pin stubs.
-
-Neither is a layout defect. Signoff coverage is the KLayout full-deck DRC plus
-LVS, both clean, so `RUN_KLAYOUT_XOR` is off.
+`make sram` is not optional on a fresh checkout, `build/` is gitignored.
 
 ---
 
 ## Signoff
 
-Final results at 12 ns, extracted parasitics, all nine corners:
+10 ns, extracted parasitics, all nine corners:
 
-| Corner | Setup WS | Setup TNS | #Setup | Hold WS | Hold TNS | #Hold |
+| Corner | Setup WS | Setup TNS | #Setup | Hold WS | #Hold | Max slew |
 | --- | --- | --- | --- | --- | --- | --- |
-| nom_tt_025C_1v80 | 4.074 | 0.000 | 0 | 0.351 | 0.000 | 0 |
-| nom_ss_100C_1v60 | 0.501 | 0.000 | 0 | 0.718 | 0.000 | 0 |
-| nom_ff_n40C_1v95 | 4.518 | 0.000 | 0 | 0.199 | 0.000 | 0 |
-| min_tt_025C_1v80 | 4.521 | 0.000 | 0 | 0.351 | 0.000 | 0 |
-| min_ss_100C_1v60 | 0.771 | 0.000 | 0 | 0.704 | 0.000 | 0 |
-| min_ff_n40C_1v95 | 4.953 | 0.000 | 0 | 0.200 | 0.000 | 0 |
-| max_tt_025C_1v80 | 3.863 | 0.000 | 0 | 0.351 | 0.000 | 0 |
-| max_ss_100C_1v60 | **0.232** | 0.000 | 0 | 0.733 | 0.000 | 0 |
-| max_ff_n40C_1v95 | 4.307 | 0.000 | 0 | **0.197** | 0.000 | 0 |
+| nom_tt_025C_1v80 | 3.6163 | 0.000 | 0 | 0.2778 | 0 | 4 |
+| nom_ss_100C_1v60 | 0.5810 | 0.000 | 0 | 0.5963 | 0 | 18 |
+| nom_ff_n40C_1v95 | 4.0460 | 0.000 | 0 | 0.1532 | 0 | 4 |
+| min_tt_025C_1v80 | 3.6392 | 0.000 | 0 | 0.2825 | 0 | 4 |
+| min_ss_100C_1v60 | 0.6682 | 0.000 | 0 | 0.5547 | 0 | 8 |
+| min_ff_n40C_1v95 | 4.0613 | 0.000 | 0 | 0.1590 | 0 | 4 |
+| max_tt_025C_1v80 | 3.5846 | 0.000 | 0 | 0.2716 | 0 | 4 |
+| max_ss_100C_1v60 | **0.5018** | 0.000 | 0 | 0.5917 | 0 | **24** |
+| max_ff_n40C_1v95 | 4.0240 | 0.000 | 0 | **0.1453** | 0 | 7 |
 
 ### Design stats
 
 | Metric | Value |
 | --- | --- |
-| Die area | 475,950 µm² (570 × 835) |
-| Core area | 405,418 µm² |
-| Utilisation | 74.2 % |
-| Instances | 52,924 |
-| — sequential | 1,739 |
-| — combinational | 13,731 |
-| — timing-repair buffers | 1,482 |
-| — clock buffers | 277 |
-| — macros | 1 |
-| — antenna diodes | 42 |
-| Power (total) | 13.5 mW |
-| — internal / switching / leakage | 10.1 mW / 3.16 mW / 175 µW |
-| Wirelength | 552,475 µm |
-| Vias | 148,071 |
-| IR drop worst / avg | 1.14 mV / 111 µV |
-| Clock skew setup / hold | 0.358 / −0.277 ns |
+| Die area | 502,425 µm² (758.08 × 662.76) |
+| Core area | 470,451 µm² |
+| Utilisation | 69.0 % |
+| Instances | 57,050 |
+| sequential | 2,120 |
+| multi-input combinational | 11,307 |
+| buffers (all) | 1,303 |
+| timing-repair buffers | 922 |
+| clock buffers / inverters | 381 / 151 |
+| clock gates | 51 |
+| tap / fill | 4,474 / 37,044 |
+| antenna diodes | 329 |
+| macros | 2 |
+| Power (total) | 11.9 mW |
+| internal / switching / leakage | 7.92 mW / 3.99 mW / 0.34 µW |
+| Wirelength | 528,547 µm |
+| Vias | 127,033 |
+| IR drop worst / avg | 0.781 mV / 65.6 µV |
+| Clock skew (worst setup, nom_ss) | 1.406 ns |
+
+Skew there is a maximum over all register pairs, including pairs with no timing
+path between them. It says nothing about any particular failing path.
+
+### Accepted violations
+
+27 total, all characterised. None gate the design.
+
+| Group | Count | Why it stays |
+| --- | --- | --- |
+| `rstb` net (`u_m0/m1/rstb`, `_24560_/D`, `_24561_/Q`) | 4 slew + the 1 max_cap | `opt_merge` collapses the two `sram_rst_rel` instances, so one flop drives both macros 368 µm apart at 0.70 pF. Held by `RSZ_DONT_TOUCH_RX`, so no tool may buffer it. Async reset, released once at startup |
+| `u_sram.u_m*/din[*]` | 20 slew, 1.51 to 1.86 ns | Shared `i_dma_wdata` to both macros. AXI-group paths arrive ~4 ns into a 10 ns period, so a slow edge on a long-stable data input is benign |
+| `place1029/X`, `clkbuf_3_0__f__11155_/X` | 2 fanout (23, 21 vs 20) | Neither appears in any slew list |
+
+SDC cannot waive these. OpenSTA uses `min(sdc_limit, liberty_limit)`, so
+`set_max_transition` and `set_max_capacitance` can only tighten a
+library-derived limit. `set_max_capacitance 0.80 [get_pins {_24561_/Q}]` was
+tried, did reach the generated SDC, and the report still showed the `dfrtp_2`
+limit of 0.203257. The only mechanisms are a physical fix or checker scoping via
+`MAX_CAP_VIOLATION_CORNERS` / `MAX_SLEW_VIOLATION_CORNERS`.
+
+Watch the object-type asymmetry, which aborts the flow: `set_max_capacitance`
+accepts pins, `set_max_transition` does not (clocks, cells and ports only).
+Passing a pin gives `Error: unsupported object type Pin`.
 
 ---
 
-## Notes and limitations
+## How timing was closed
 
-- **The SRAM Liberty is TT-only.** There is no ss/ff characterisation for the
-  macro, so slow- and fast-corner STA uses the typical macro model. Timing
-  margin on macro paths is therefore softer than it looks. The inverted read
-  clock helps here too — it buys a full period instead of half, which absorbs a
-  lot of uncharacterised variation.
-- Max-slew, max-cap and max-fanout report WARN-level counts. These are advisory,
-  concentrated on the same macro output nets, and do not gate signoff.
-- Two floating nets are reported by the resizer; both are unused macro outputs
-  (`dout0`, which the design does not read).
-- `RUN_KLAYOUT_XOR` is disabled — see the finding above.
-- `tb_systolic_array` is the up-to-date reference testbench (194/194). Some of
-  the older block-level testbenches lag the current RTL interfaces.
+**1. `DESIGN_REPAIR_REMOVE_BUFFERS: true` cost a whole run.** It deletes the
+buffer trees synthesis already built. Off, `repair_design` upsizes drivers (180
+resized, 180 buffers). On, it chains minimum-size `buf_1`s (49 resized, 981
+buffers), two stages at fanout 16 burning 2.84 ns, 28 % of the period, on a PE
+weight broadcast. Setup went +0.4801 to -0.7564 and slew 1310 to 5472.
+`Resized >> Inserted` is the healthy shape for that step.
+
+**2. The pre-route RC model was 2.03× optimistic, the root cause.**
+`SIGNAL_WIRE_RC_LAYERS` was unset, so LibreLane averaged met1 to met5 and
+modelled signal wire R at `4.402703e-04` kΩ/µm. Local nets actually route on
+met1/met2 at `8.928571e-04`. Every pre-route decision (driver sizing, `buf_1` vs
+`buf_4`, buffer count) was made against half the real resistance. Setting it to
+`["met1","met2"]` took setup +0.0837 to **+0.5018**.
+
+**3. Both post-GRT gates defaulted off.** `RUN_POST_GRT_DESIGN_REPAIR` and
+`RUN_POST_GRT_RESIZER_TIMING` were `false`, so `GRT_RESIZER_SETUP_SLACK_MARGIN`,
+`GRT_RESIZER_HOLD_SLACK_MARGIN` and every `GRT_DESIGN_REPAIR_*` were set and
+never read. Enable them together: resizer-timing defends setup while
+design-repair inserts buffers for slew.
+
+**4. 1296 of 1320 slew violations were self-inflicted.** `base.sdc` set
+`set_max_transition 0.85` against the PDK's `default_max_transition : 1.5000`,
+1.76× tighter than sky130 requires. At the PDK limit only 24 remain.
+
+Two traps:
+
+- GRT-stage DRV numbers are unusable. Even after the RC fix, post-GRT STA
+  reported 4 slew violations against post-RCX's 1320, because the estimation
+  model carries via resistance as all zeros while `mcon` alone is 9.3e-03 kΩ/cut.
+  Never A/B a buffering change on a pre-RCX step.
+- Check `<step>/top.sdc` before believing any constraint-shaped config key.
+  `MAX_TRANSITION_CONSTRAINT` (0.75) and `MAX_FANOUT_CONSTRAINT` (10) read as set
+  in `resolved.json` but are inert, because the project supplies `PNR_SDC_FILE`
+  and `base.sdc` wins.
+
+Measured and rejected: excluding `buf_1` does not help. Of the 1320 violating
+pins only 80 sit on `buf_1`. The bulk are input pins of ordinary 2× logic
+receiving bad slew, `a221o_2` (194), `a22o_2` (152), `nand4_2` (73). That is
+distributed marginal slew, not a buffer-sizing problem.
+
+---
+
+## Limitations
+
+- The `rstb` merge is not defeated. A `(* keep_hierarchy *)` boundary works only
+  under yosys's native frontend; `USE_SLANG: true` drops the attribute, so
+  `FLATTEN` removes the boundary and `OPT_MERGE` re-collapses the chains.
+  `(* keep *)` on the reg pins the net name while the cells still merge. A real
+  fix has to make the two chains' inputs structurally different.
+- `RSZ_DONT_TOUCH_RX` must stay an active key. Commenting it out is not neutral,
+  LibreLane's default is `"$^"`, which protects nothing. It matches net names
+  against a flattened netlist, so an RTL rename can silently evaporate the
+  protection and kill global placement with a fatal `RSZ-2008`. It is now
+  `"u_sram.*(rstb|rel_r).*"`, widened to match both spellings.
+- Macro Y, the halo and the core top are coupled. Y must satisfy
+  `(y + 0.07 - 0.17) / 0.34 = integer` for the met1 pins to land on track. A
+  drift to 447.16 put 0 of 78 pins on-track and produced ~150 `DRT-0419`
+  warnings. 446.86 aligns and leaves 0.300 µm of halo headroom. Macro X cannot
+  be aligned, the 6.10 µm pin pitch against the 0.46 µm met2 pitch is
+  incommensurate.
+- All 2.46 M Magic GDS DRC errors are inside the macro, verified by testing
+  every bounding box against the two footprints. Handled with
+  `MAGIC_DRC_MAGLEFS`. Do not "fix" it with `MAGIC_DRC_USE_GDS: false`.
+- `RES_JOBS` is set to 2, the measured optimum is 3.
+- No DFT: no scan, no JTAG, no test-mode reset bypass.
+- `make sta` is stale, it reads a deleted `constraints/top.sdc` and probes
+  `u_array.current_state`, which no longer exists.
+- ~13 % throughput headroom remains, needing the AW channel pipelined across
+  bursts. Not verifiable on the current benches, both write slaves are strictly
+  serial. Upgrading the bench model is the prerequisite.
