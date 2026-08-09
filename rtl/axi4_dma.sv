@@ -5,7 +5,7 @@
 module axi4_dma #(
 	parameter integer ROW_W = 32,
 	parameter integer AXI_ADDR_W = 32,
-	parameter integer AXI_ID_W = 4,
+	parameter integer AXI_ID_W = 1, // single outstanding txn, ID always 0
 	parameter integer SRAM_ADDR_W = 6,
 
 	parameter integer AXI_DATA_W = ROW_W, // must eq ROW_W
@@ -30,7 +30,6 @@ module axi4_dma #(
 	output wire [7:0] o_m_arlen,
 	output wire [2:0] o_m_arsize,
 	output wire [1:0] o_m_arburst,
-	output wire o_m_arlock,
 	output wire [3:0] o_m_arcache,
 	output wire [2:0] o_m_arprot,
 	output wire o_m_arvalid,
@@ -57,7 +56,6 @@ module axi4_dma #(
 	assign o_m_arid = '0; // single master; one outstanding transaction
 	assign o_m_arsize = 3'b010; // 4 bytes per beat
 	assign o_m_arburst = 2'b01; // INCR
-	assign o_m_arlock = 1'b0;
 	assign o_m_arcache = 4'b0011;
 	assign o_m_arprot = 3'b000;
 	assign o_dma_we = 1'b1;
@@ -118,16 +116,17 @@ module axi4_dma #(
 		endcase
 	end
 
-	logic [LEN_W-1:0] len_r;
+	localparam integer ARLEN_W = LEN_W + 1;
 
+	logic [ARLEN_W-1:0] arlen_r;
 	always_ff @(posedge clk) begin
 		if (idle_state && i_start) begin
-			len_r <= i_len;
+			arlen_r <= {1'b0, i_len} - 1'b1;
 		end
 	end
 
 	assign o_m_araddr = {i_src_addr[AXI_ADDR_W-1:2], 2'b00};
-	assign o_m_arlen = len_r - 1'b1;
+	assign o_m_arlen = arlen_r;
 
 	logic [SRAM_ADDR_W-1:0] wr_ptr_r;
 	assign o_dma_addr = wr_ptr_r;
@@ -140,7 +139,7 @@ module axi4_dma #(
 		end
 	end
 
-	wire expected_last = ({1'b0, wr_ptr_r} == (len_r - 1'b1));
+	wire expected_last = (arlen_r == ARLEN_W'(wr_ptr_r));
 	wire len_mismatch = beat && (i_m_rlast != expected_last);
 
 	assign o_busy = !idle_state;
@@ -176,3 +175,4 @@ module axi4_dma #(
 
 endmodule
 `default_nettype wire
+

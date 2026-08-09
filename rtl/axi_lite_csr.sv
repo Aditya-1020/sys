@@ -2,19 +2,16 @@
 `timescale 1ps/1ps
 
 module axi_lite_csr #(
-	parameter int ADDR_WIDTH = 8,
-	parameter int DATA_WIDTH = 32,
+	parameter integer ADDR_WIDTH = 8,
+	parameter integer DATA_WIDTH = 32,
 
-	// only the implemented bits of these registers are stored; the rest read back 0
-	parameter int CTRL_W = 6,  // EN, GO, LOAD_W, STORE, AUTO_ST, AUTO_FILL
-	parameter int LEN_W = 7,   // 1..64 words
-	parameter int NJOBS_W = 16 // auto-fill tile count
+	localparam integer CTRL_W = 6,  // EN, GO, LOAD_W, STORE, AUTO_ST, AUTO_FILL
+	localparam integer LEN_W = 7,   // 1 to 64 words
+	localparam integer NJOBS_W = 16 // auto-fill tile count
 )(
 	input wire aclk,
 	input wire aresetn,
 
-	// write addr channel. byte address into a word-aligned register file, so both
-	// address ports drop [1:0] -- see ADDR_LSB below
 	/* verilator lint_off UNUSEDSIGNAL */
 	input wire [ADDR_WIDTH-1:0] i_s_axil_awaddr,
 	input wire i_s_axil_awvalid,
@@ -55,20 +52,20 @@ module axi_lite_csr #(
 	input wire [DATA_WIDTH-1:0] csr_result,
 	output wire csr_result_rd
 );
-	localparam int ADDR_LSB = $clog2(DATA_WIDTH)-3;
-	localparam int IDX_W = ADDR_WIDTH - ADDR_LSB;
+	localparam integer ADDR_LSB = $clog2(DATA_WIDTH)-3;
+	localparam integer IDX_W = ADDR_WIDTH - ADDR_LSB;
+	localparam integer NREG = 7; // 0x00 to 0x18
 
-	localparam logic [IDX_W-1:0] IDX_CTRL = 0; // 0x00 RW
-	localparam logic [IDX_W-1:0] IDX_STATUS = 1;// 0x04 RO
-	localparam logic [IDX_W-1:0] IDX_SRC_ADDR = 2;  // 0x08 RW
-	localparam logic [IDX_W-1:0] IDX_LEN = 3; // 0x0C RW
-	localparam logic [IDX_W-1:0] IDX_RESULT = 4; // 0x10 RO, pop-on-read
-	localparam logic [IDX_W-1:0] IDX_DST_ADDR = 5;  // 0x14 RW
-	localparam logic [IDX_W-1:0] IDX_NJOBS = 6; // 0x18 RW
+	localparam integer IDX_CTRL = 0; // 0x00 RW
+	localparam integer IDX_STATUS = 1;// 0x04 RO
+	localparam integer IDX_SRC_ADDR = 2;  // 0x08 RW
+	localparam integer IDX_LEN = 3; // 0x0C RW
+	localparam integer IDX_RESULT = 4; // 0x10 RO, pop-on-read
+	localparam integer IDX_DST_ADDR = 5;  // 0x14 RW
+	localparam integer IDX_NJOBS = 6; // 0x18 RW
 
 	logic awskd_valid, arskd_valid;
 	wire wskd_valid;
-	logic [IDX_W-1:0] awskd_addr, arskd_addr;
 	wire [DATA_WIDTH-1:0] wskd_data;
 	/* verilator lint_off UNUSEDSIGNAL */
 	logic [DATA_WIDTH-1:0] wskd_ctrl;
@@ -90,8 +87,21 @@ module axi_lite_csr #(
 		end
 	endfunction
 
+	function automatic logic [NREG-1:0] reg_onehot (input logic [IDX_W-1:0] idx);
+		reg_onehot = '0;
+		for (int i = 0; i < NREG; i++) begin
+			if (idx == IDX_W'(i)) begin
+				reg_onehot[i] = 1'b1;
+			end
+		end
+	endfunction
+
+	wire [NREG-1:0] awdec = reg_onehot(i_s_axil_awaddr[ADDR_WIDTH-1:ADDR_LSB]);
+	wire [NREG-1:0] ardec = reg_onehot(i_s_axil_araddr[ADDR_WIDTH-1:ADDR_LSB]);
+	logic [NREG-1:0] awskd_sel, arskd_sel;
+
 	skid_buffer #(
-		.N(IDX_W)
+		.N(NREG)
 	) aw_skid (
 		.clk    (aclk),
 		.rstn   (aresetn),
@@ -99,8 +109,8 @@ module axi_lite_csr #(
 		.o_ready(o_s_axil_awready),
 		.i_ready(axil_wr_ready),
 		.o_valid(awskd_valid),
-		.i_data (i_s_axil_awaddr[ADDR_WIDTH-1:ADDR_LSB]),
-		.o_data (awskd_addr)
+		.i_data (awdec),
+		.o_data (awskd_sel)
 	);
 
 	assign wskd_valid = i_s_axil_wvalid;
@@ -109,7 +119,7 @@ module axi_lite_csr #(
 	assign o_s_axil_wready = axil_wr_ready;
 
 	skid_buffer #(
-		.N(IDX_W)
+		.N(NREG)
 	) ar_skid (
 		.clk    (aclk),
 		.rstn   (aresetn),
@@ -117,13 +127,27 @@ module axi_lite_csr #(
 		.o_ready(o_s_axil_arready),
 		.i_ready(axil_rd_ready),
 		.o_valid(arskd_valid),
-		.i_data (i_s_axil_araddr[ADDR_WIDTH-1:ADDR_LSB]),
-		.o_data (arskd_addr)
+		.i_data (ardec),
+		.o_data (arskd_sel)
 	);
-	
-	wire stall_result_rd = arskd_valid && (arskd_addr == IDX_RESULT) && !i_fifo_valid;
+
+	logic res_pop_r;
+	wire ar_is_result = arskd_sel[IDX_RESULT];
+	wire rd_ch_free = !axil_rvalid_r || i_s_axil_rready;
+	wire res_rd_ok = i_fifo_valid && !res_pop_r;
+
 	assign axil_wr_ready = awskd_valid && wskd_valid && (!axil_bvalid_r || i_s_axil_bready);
-	assign axil_rd_ready = arskd_valid && (!axil_rvalid_r || i_s_axil_rready) && !stall_result_rd;
+	assign axil_rd_ready = arskd_valid && rd_ch_free && (!ar_is_result || res_rd_ok);
+
+	always_ff @(posedge aclk or negedge aresetn) begin
+		if (!aresetn) begin
+			res_pop_r <= 1'b0;
+		end else begin
+			res_pop_r <= axil_rd_ready && ar_is_result;
+		end
+	end
+
+	assign csr_result_rd = res_pop_r;
 
 	assign wskd_ctrl = apply_wstrb(csr_ctrl, wskd_data, wskd_strb);
 	assign wskd_src_addr = apply_wstrb(csr_src_addr, wskd_data, wskd_strb);
@@ -131,23 +155,7 @@ module axi_lite_csr #(
 	assign wskd_dst_addr = apply_wstrb(csr_dst_addr, wskd_data, wskd_strb);
 	assign wskd_njobs = apply_wstrb(csr_njobs, wskd_data, wskd_strb);
 
-	logic wr_ctrl, wr_src_addr, wr_len, wr_dst_addr, wr_njobs;
-	always_comb begin
-		wr_ctrl = 1'b0;
-		wr_src_addr = 1'b0;
-		wr_len = 1'b0;
-		wr_dst_addr = 1'b0;
-		wr_njobs = 1'b0;
-
-		case (awskd_addr)
-			IDX_CTRL: wr_ctrl = axil_wr_ready;
-			IDX_SRC_ADDR: wr_src_addr = axil_wr_ready;
-			IDX_LEN: wr_len = axil_wr_ready;
-			IDX_DST_ADDR: wr_dst_addr = axil_wr_ready;
-			IDX_NJOBS: wr_njobs = axil_wr_ready;
-			default: ;
-		endcase
-	end
+	wire [NREG-1:0] wr_en = {NREG{axil_wr_ready}} & awskd_sel;
 
 	logic [CTRL_W-1:0] csr_ctrl_r;
 	logic [LEN_W-1:0] csr_len_r;
@@ -164,12 +172,12 @@ module axi_lite_csr #(
 			csr_len_r <= '0;
 			csr_dst_addr <= '0;
 			csr_njobs_r <= '0;
-		end else if (axil_wr_ready) begin
-			if (wr_ctrl) csr_ctrl_r <= CTRL_W'(wskd_ctrl);
-			if (wr_src_addr) csr_src_addr <= wskd_src_addr;
-			if (wr_len) csr_len_r <= LEN_W'(wskd_len);
-			if (wr_dst_addr) csr_dst_addr <= wskd_dst_addr;
-			if (wr_njobs) csr_njobs_r <= NJOBS_W'(wskd_njobs);
+		end else begin
+			if (wr_en[IDX_CTRL]) csr_ctrl_r <= CTRL_W'(wskd_ctrl);
+			if (wr_en[IDX_SRC_ADDR]) csr_src_addr <= wskd_src_addr;
+			if (wr_en[IDX_LEN]) csr_len_r <= LEN_W'(wskd_len);
+			if (wr_en[IDX_DST_ADDR]) csr_dst_addr <= wskd_dst_addr;
+			if (wr_en[IDX_NJOBS]) csr_njobs_r <= NJOBS_W'(wskd_njobs);
 		end
 	end
 
@@ -186,27 +194,29 @@ module axi_lite_csr #(
 	assign o_s_axil_bvalid = axil_bvalid_r;
 	assign o_s_axil_bresp = 2'b00;
 
-	logic [31:0] axil_rdata_next;
+	logic [DATA_WIDTH-1:0] rd_map [0:NREG-1];
+	always_comb begin
+		rd_map[IDX_CTRL] = csr_ctrl;
+		rd_map[IDX_STATUS] = csr_status;
+		rd_map[IDX_SRC_ADDR] = csr_src_addr;
+		rd_map[IDX_LEN] = csr_len;
+		rd_map[IDX_RESULT] = csr_result;
+		rd_map[IDX_DST_ADDR] = csr_dst_addr;
+		rd_map[IDX_NJOBS] = csr_njobs;
+	end
+
+	logic [DATA_WIDTH-1:0] axil_rdata_next;
 	always_comb begin
 		axil_rdata_next = '0;
-		case (arskd_addr)
-			IDX_CTRL: axil_rdata_next = csr_ctrl;
-			IDX_STATUS: axil_rdata_next = csr_status;
-			IDX_SRC_ADDR: axil_rdata_next = csr_src_addr;
-			IDX_LEN: axil_rdata_next = csr_len;
-			IDX_RESULT: axil_rdata_next = csr_result;
-			IDX_DST_ADDR: axil_rdata_next = csr_dst_addr;
-			IDX_NJOBS: axil_rdata_next = csr_njobs;
-			default: ;
-		endcase
+		for (int i = 0; i < NREG; i++) begin
+			axil_rdata_next |= {DATA_WIDTH{arskd_sel[i]}} & rd_map[i];
+		end
 	end
-	
-	assign csr_result_rd = axil_rd_ready && (arskd_addr == IDX_RESULT);
 
 	always_ff @(posedge aclk or negedge aresetn) begin
 		if (!aresetn) begin
 			axil_rdata_r <= '0;
-		end else if (!axil_rvalid_r || i_s_axil_rready) begin
+		end else if (axil_rd_ready) begin
 			axil_rdata_r <= axil_rdata_next;
 		end
 	end
