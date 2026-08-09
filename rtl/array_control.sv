@@ -27,13 +27,13 @@ module array_control #(
 	input wire [ROW_W-1:0] i_array_rdata,
 
 	// to the systolic array
-	output wire o_start,
 	output wire o_b_en,
 	output wire [LANE_W-1:0] o_b_lane,
 	output wire [ROW_W-1:0] o_b_wdata,
 	output wire o_a_valid,
 	output wire [ROW_W-1:0] o_ld_a,
-	input wire i_sys_done,
+	input wire i_array_busy,
+	output wire o_reserve, // pulse issued tile
 
 	// CSR status word
 	output wire o_busy,
@@ -42,11 +42,9 @@ module array_control #(
 	localparam integer JOB_WORDS = 2*MATRIX_SIZE;
 	localparam integer PTR_W = $clog2(JOB_WORDS);
 
-	typedef enum logic [1:0] {
+	typedef enum logic [0:0] {
 		IDLE,
-		FETCH,
-		START,
-		RUN
+		FETCH
 	} state_t;
 	state_t current_state, next_state;
 
@@ -54,25 +52,44 @@ module array_control #(
 	logic [SRAM_ADDR_W-1:0] job_base_r;
 	logic buf_live_r;
 	logic w_valid_r, load_w_r;
-	wire load_w_now = i_load_w || !w_valid_r;
 
-	wire start_job = (current_state == IDLE) && i_enable && i_room && (i_fill_done || buf_live_r);
 	wire [PTR_W-1:0] last_word = load_w_r ? unsigned'(PTR_W'(JOB_WORDS-1)) : unsigned'(PTR_W'(MATRIX_SIZE-1));
-	wire fetch_last = (current_state == FETCH) && (rd_ptr_r == last_word);
-	wire job_end = (current_state == RUN) && i_sys_done;
-	wire [LEN_W-1:0] next_base = {1'b0, job_base_r} + LEN_W'(load_w_r ? JOB_WORDS : MATRIX_SIZE);
-	wire last_job = (next_base >= i_len);
+
+	wire tile_done = (current_state == FETCH) && (rd_ptr_r == last_word);
+	wire w_valid_next = w_valid_r || (tile_done && load_w_r);
+	wire load_w_now = i_load_w || !w_valid_next;
+	wire w_ok = !load_w_now || !i_array_busy;
+
+	logic [LEN_W-1:0] len_r;
+	wire [LEN_W-1:0] next_base = {1'b0, job_base_r} + LEN_W'(load_w_r ? JOB_WORDS : MATRIX_SIZE);	
+	wire last_job_w = (next_base >= len_r);
+
+	logic last_job_r;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			last_job_r <= 1'b0;
+		end else begin
+			last_job_r <= last_job_w;
+		end
+	end
+
+	wire fast_restart = tile_done && !last_job_r && i_enable && i_room && w_ok;
+	wire start_job = ((current_state == IDLE) && i_enable && i_room && w_ok && (i_fill_done || buf_live_r)) || fast_restart;
+
+	assign o_reserve = start_job;
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			job_base_r <= '0;
 			buf_live_r <= 1'b0;
+			len_r <= '0;
 		end else begin
-			if (start_job) begin
+			if (start_job && (current_state == IDLE)) begin
 				buf_live_r <= 1'b1;
+				len_r <= i_len; // snapshot for the whole buffer
 			end
-			if (job_end) begin
-				if (last_job) begin
+			if (tile_done) begin
+				if (last_job_r) begin
 					job_base_r <= '0;
 					buf_live_r <= 1'b0;
 				end else begin
@@ -88,7 +105,7 @@ module array_control #(
 			w_valid_r <= 1'b0;
 		end else begin
 			if (start_job) load_w_r <= load_w_now;
-			if (job_end && load_w_r) w_valid_r <= 1'b1;
+			if (tile_done && load_w_r) w_valid_r <= 1'b1;
 		end
 	end
 
@@ -103,15 +120,7 @@ module array_control #(
 				end
 			end
 			FETCH: begin
-				if (fetch_last) begin
-					next_state = START;
-				end
-			end
-			START: begin
-				next_state = RUN;
-			end
-			RUN: begin
-				if (job_end) begin
+				if (tile_done && !fast_restart) begin
 					next_state = IDLE;
 				end
 			end
@@ -126,12 +135,13 @@ module array_control #(
 		end
 	end
 
-	// address generate 8 continuous reads
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			rd_ptr_r <= '0;
+		end else if (tile_done) begin
+			rd_ptr_r <= '0;
 		end else if (current_state == FETCH) begin
-			rd_ptr_r <= rd_ptr_r + 1'b1; // wrap after last word
+			rd_ptr_r <= rd_ptr_r + 1'b1;
 		end else begin
 			rd_ptr_r <= '0;
 		end
@@ -161,9 +171,8 @@ module array_control #(
 	assign o_b_wdata = i_array_rdata;
 	assign o_ld_a = i_array_rdata;
 	assign o_a_valid = rd_vld_r && !rd_isb_r;
-	assign o_start = (current_state == START);
 
-	assign o_array_done = (current_state == IDLE) && i_enable && i_room && !buf_live_r;
+	assign o_array_done = (current_state == IDLE) && i_enable && i_room && w_ok && !buf_live_r;
 	assign o_busy = (current_state != IDLE);
 
 endmodule
