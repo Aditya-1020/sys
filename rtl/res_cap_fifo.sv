@@ -4,34 +4,36 @@
 module res_cap_fifo #(
 	parameter integer MATRIX_SIZE = 4,
 	parameter integer DATA_WIDTH = 8,
-	localparam integer JOBS = 2,
+	parameter integer BEAT_W = 32, // AXI master data width
+	parameter integer JOBS = 2,
+	
 	localparam integer RESULT_WIDTH = (2*DATA_WIDTH) + $clog2(MATRIX_SIZE), // 18
-	localparam integer TOTAL_ELEMENTS = MATRIX_SIZE * MATRIX_SIZE, // 16
-	localparam integer DEPTH = JOBS * TOTAL_ELEMENTS, // 32
-	localparam integer LVL_W = $clog2(DEPTH + 1) // 6
+	localparam integer ROWS = JOBS * MATRIX_SIZE, // rows of capacity
+	localparam integer LVL_W = $clog2(ROWS + 1)
 )(
 	input wire clk,
 	input wire rstn,
 	input wire [MATRIX_SIZE-1:0] i_result_valid, // one per column
 	input wire [MATRIX_SIZE*RESULT_WIDTH-1:0] i_result_data,
+	input wire i_reserve,
 	output wire o_room,
 	input wire rd_en,
-	output wire signed [RESULT_WIDTH-1:0] o_rdata,
+	output wire [BEAT_W-1:0] o_rdata, 
 	output wire o_valid,
 	output wire [LVL_W-1:0] o_level,
 	output wire o_overflow
 );
 	localparam integer ROW_W = MATRIX_SIZE * RESULT_WIDTH; // 72
-	localparam integer ROWS = JOBS * MATRIX_SIZE; // 8 for 2 jobs
-	localparam integer PTR_W = $clog2(ROWS); // 3
-	localparam integer RLVL_W = $clog2(ROWS + 1); // 4
-	localparam integer COL_W = $clog2(MATRIX_SIZE); // 2
+	localparam integer PTR_W = $clog2(ROWS);
+	localparam integer TILE_BITS = MATRIX_SIZE * ROW_W; // 288
+	localparam integer TILE_BEATS = TILE_BITS / BEAT_W; // 9
+	localparam integer BI_W = $clog2(TILE_BEATS);
 
 	logic [ROW_W-1:0] mem [0:ROWS-1];
 	logic [PTR_W-1:0] wr_ptr [0:MATRIX_SIZE-1];
-	logic [RLVL_W-1:0] level_r;
+	logic [LVL_W-1:0] level_r;
 
-	wire full = (level_r == RLVL_W'(ROWS));
+	wire full = (level_r == LVL_W'(ROWS));
 	wire row_valid = i_result_valid[MATRIX_SIZE-1];
 	wire push = row_valid && !full;
 
@@ -45,7 +47,7 @@ module res_cap_fifo #(
 				if (!rstn) begin
 					wr_ptr[c] <= '0;
 				end else if (wr_en) begin
-					wr_ptr[c] <= wr_ptr[c] + 1'b1;
+					wr_ptr[c] <= (wr_ptr[c] == PTR_W'(ROWS-1)) ? '0 : (wr_ptr[c] + 1'b1);
 				end
 			end
 
@@ -57,45 +59,12 @@ module res_cap_fifo #(
 		end
 	endgenerate
 
-	logic [ROW_W-1:0] row_buf_r;
-	logic row_buf_valid_r;
 
-	logic signed [RESULT_WIDTH-1:0] head_r;
-	logic head_valid_r;
-	logic [COL_W-1:0] rd_sub;
-
-	wire consume = head_valid_r && rd_en;
-	wire stage2_needs_data = !head_valid_r || consume;
-	wire stage1_has_data = row_buf_valid_r;
-
-	wire transfer = stage2_needs_data && stage1_has_data;
-	wire last_element = (rd_sub == COL_W'(MATRIX_SIZE-1));
-	wire pop_row = transfer && last_element;
-
-	wire can_load = (level_r > RLVL_W'(row_buf_valid_r));
-	wire load_row = (!row_buf_valid_r || pop_row) && can_load;
-
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			row_buf_valid_r <= 1'b0;
-		end else begin
-			if (load_row) begin
-				row_buf_valid_r <= 1'b1;
-			end else if (pop_row) begin
-				row_buf_valid_r <= 1'b0;
-			end
-		end
-	end
+	logic [ROW_W-1:0] r0_r, r1_r;
+	logic r0_v, r1_v;
+	logic [BI_W-1:0] beat_idx; // beat index within the current tile
 
 	logic [ROWS-1:0] rd_sel_r;
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			rd_sel_r <= {{(ROWS-1){1'b0}}, 1'b1};
-		end else if (load_row) begin
-			rd_sel_r <= {rd_sel_r[ROWS-2:0], rd_sel_r[ROWS-1]};
-		end
-	end
-
 	logic [ROW_W-1:0] mem_rd;
 	always_comb begin
 		mem_rd = '0;
@@ -104,20 +73,118 @@ module res_cap_fifo #(
 		end
 	end
 
-	always_ff @(posedge clk) begin
-		if (load_row) begin
-			row_buf_r <= mem_rd;
+	function automatic integer max_beat_off;
+		integer m;
+		begin
+			m = 0;
+			for (int b = 0; b < TILE_BEATS; b++) begin
+				if (((BEAT_W * b) % ROW_W) > m) begin
+					m = (BEAT_W * b) % ROW_W;
+				end
+			end
+			max_beat_off = m;
+		end
+	endfunction
+	localparam integer WIN_W = max_beat_off() + BEAT_W; // 96
+	localparam integer R1_BITS = WIN_W - ROW_W; // 24
+
+	wire [WIN_W-1:0] win = {r1_r[R1_BITS-1:0], r0_r};
+	logic [BEAT_W-1:0] beat_data;
+	logic beat_str; // beat crosses into r1
+	logic beat_adv; // beat finishes r0
+
+	logic [BEAT_W-1:0] beat_mux [0:TILE_BEATS-1];
+	logic [TILE_BEATS-1:0] str_mux, adv_mux;
+
+	genvar i;
+	generate
+		for (i = 0; i < TILE_BEATS; i = i + 1) begin : gen_beat
+			localparam integer OFF = (BEAT_W * i) % ROW_W;
+			localparam integer STR = ((OFF + BEAT_W) > ROW_W) ? 1 : 0;
+			localparam integer ADV = (((BEAT_W * (i+1)) / ROW_W) > ((BEAT_W * i) / ROW_W)) ? 1 : 0;
+			wire sel = (beat_idx == BI_W'(i));
+			assign beat_mux[i] = sel ? win[OFF +: BEAT_W] : {BEAT_W{1'b0}};
+			assign str_mux[i] = sel && (STR != 0);
+			assign adv_mux[i] = sel && (ADV != 0);
+		end
+	endgenerate
+
+	always_comb begin
+		beat_data = '0;
+		for (int k = 0; k < TILE_BEATS; k++) begin
+			beat_data |= beat_mux[k];
+		end
+	end
+	assign beat_str = |str_mux;
+	assign beat_adv = |adv_mux;
+
+	// output register, one beat deep
+	logic [BEAT_W-1:0] head_r;
+	logic head_valid_r;
+
+	wire beat_ready = r0_v && (!beat_str || r1_v);
+	wire consume = head_valid_r && rd_en;
+	wire transfer = beat_ready && (!head_valid_r || consume);
+	wire row_retire = transfer && beat_adv; // r0 finished
+
+	wire [1:0] staged = {1'b0, r0_v} + {1'b0, r1_v};
+	wire can_load = (level_r > LVL_W'(staged));
+	wire slot_free = !r0_v || !r1_v || row_retire;
+	wire load_en = can_load && slot_free;
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			r0_v <= 1'b0;
+			r1_v <= 1'b0;
+			r0_r <= '0;
+			r1_r <= '0;
+		end else if (row_retire) begin
+			if (r1_v) begin
+				r0_r <= r1_r;
+				r0_v <= 1'b1;
+				if (load_en) begin
+					r1_r <= mem_rd;
+					r1_v <= 1'b1;
+				end else begin
+					r1_v <= 1'b0;
+				end
+			end else begin
+				r0_r <= mem_rd;
+				r0_v <= load_en;
+				r1_v <= 1'b0;
+			end
+		end else if (load_en) begin
+			if (!r0_v) begin
+				r0_r <= mem_rd;
+				r0_v <= 1'b1;
+			end else begin
+				r1_r <= mem_rd;
+				r1_v <= 1'b1;
+			end
 		end
 	end
 
-	// mux from row buffer
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			rd_sel_r <= {{(ROWS-1){1'b0}}, 1'b1};
+		end else if (load_en) begin
+			rd_sel_r <= {rd_sel_r[ROWS-2:0], rd_sel_r[ROWS-1]};
+		end
+	end
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			beat_idx <= '0;
+		end else if (transfer) begin
+			beat_idx <= (beat_idx == BI_W'(TILE_BEATS-1)) ? '0 : (beat_idx + 1'b1);
+		end
+	end
+
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			head_valid_r <= 1'b0;
-			rd_sub <= '0;
 		end else if (transfer) begin
 			head_valid_r <= 1'b1;
-			rd_sub <= last_element ? '0 : (rd_sub + 1'b1);
 		end else if (consume) begin
 			head_valid_r <= 1'b0;
 		end
@@ -125,16 +192,16 @@ module res_cap_fifo #(
 
 	always_ff @(posedge clk) begin
 		if (transfer) begin
-			head_r <= signed'(row_buf_r[RESULT_WIDTH*rd_sub +: RESULT_WIDTH]);
+			head_r <= beat_data;
 		end
 	end
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			level_r <= '0;
-		end else if (push && !pop_row) begin
+		end else if (push && !row_retire) begin
 			level_r <= level_r + 1'b1;
-		end else if (pop_row && !push) begin
+		end else if (row_retire && !push) begin
 			level_r <= level_r - 1'b1;
 		end
 	end
@@ -148,10 +215,26 @@ module res_cap_fifo #(
 		end
 	end
 
+	localparam integer CMT_W = $clog2(ROWS + MATRIX_SIZE + 1);
+	logic [CMT_W-1:0] committed_r;
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			committed_r <= '0;
+		end else begin
+			case ({i_reserve, row_retire})
+				2'b10: committed_r <= committed_r + CMT_W'(MATRIX_SIZE);
+				2'b01: committed_r <= committed_r - 1'b1;
+				2'b11: committed_r <= committed_r + CMT_W'(MATRIX_SIZE - 1);
+				default: committed_r <= committed_r;
+			endcase
+		end
+	end
+
 	assign o_rdata = head_r;
 	assign o_valid = head_valid_r;
-	assign o_room = (level_r <= RLVL_W'(ROWS - MATRIX_SIZE)); // room for one more job
-	assign o_level = LVL_W'({level_r, {COL_W{1'b0}}});
+	assign o_room = ((committed_r + CMT_W'(MATRIX_SIZE)) <= CMT_W'(ROWS));
+	assign o_level = level_r;
 	assign o_overflow = overflow_r;
 
 endmodule

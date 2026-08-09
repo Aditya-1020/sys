@@ -3,7 +3,9 @@
 
 module top #(
 	parameter integer AXI_ADDR_W = 32,
-	parameter integer AXI_DATA_W = 32
+	parameter integer AXI_DATA_W = 32,
+
+	localparam integer AXI_ID_W = 4 // both engines tie their ID to 0
 )(
 	input wire clk,
 	input wire rstn,
@@ -28,7 +30,7 @@ module top #(
 	input wire i_s_axil_rready,
 
 	// axi master read
-	output wire [3:0] o_m_axi_arid,
+	output wire [AXI_ID_W-1:0] o_m_axi_arid,
 	output wire [AXI_ADDR_W-1:0] o_m_axi_araddr,
 	output wire [7:0] o_m_axi_arlen,
 	output wire [2:0] o_m_axi_arsize,
@@ -46,7 +48,7 @@ module top #(
 	output wire o_m_axi_rready,
 
 	// axi master write (result store)
-	output wire [3:0] o_m_axi_awid,
+	output wire [AXI_ID_W-1:0] o_m_axi_awid,
 	output wire [AXI_ADDR_W-1:0] o_m_axi_awaddr,
 	output wire [7:0] o_m_axi_awlen,
 	output wire [2:0] o_m_axi_awsize,
@@ -67,11 +69,15 @@ module top #(
 	input wire i_m_axi_bvalid,
 	output wire o_m_axi_bready
 );
+
+	localparam integer RES_JOBS = 2;
+	
 	localparam integer MATRIX_SIZE = 4;
 	localparam integer DATA_WIDTH = 8;
 	localparam integer ROW_W = MATRIX_SIZE * DATA_WIDTH; // 32
 	localparam integer LANE_W = $clog2(MATRIX_SIZE); // 2
 	localparam integer RESULT_W = (2 * DATA_WIDTH) + $clog2(MATRIX_SIZE); // 18
+	localparam integer TILE_BITS = MATRIX_SIZE * MATRIX_SIZE * RESULT_W; // 288
 	localparam integer SRAM_ADDR_W = 6;
 	localparam integer LEN_W = SRAM_ADDR_W + 1;
 
@@ -99,8 +105,14 @@ module top #(
 	localparam integer ST_WDMA_DONE = 12;
 	localparam integer ST_WDMA_ERR = 13; // bresp err
 	localparam integer ST_AF_BUSY = 14; // auto fill busy
-	localparam integer ST_LEVEL_LSB = 16; // [21:16] fifo level
-	localparam integer ST_TILE_LSB = 22;
+
+	localparam integer LEVEL_W = $clog2((RES_JOBS * MATRIX_SIZE) + 1);
+	localparam integer ST_LEVEL_LSB = 16;
+	localparam integer ST_TILE_LSB = ST_LEVEL_LSB + LEVEL_W; // 21
+
+	// normal accesses only; neither dma engine carries the lock bit
+	assign o_m_axi_arlock = 1'b0;
+	assign o_m_axi_awlock = 1'b0;
 
 	wire resetn_synced;
 	reset_sync_2ff u_rsync (
@@ -148,32 +160,32 @@ module top #(
 	wire [SRAM_ADDR_W-1:0] arr_ctrl_addr;
 	wire [ROW_W-1:0] sram_rdata;
 
-	wire arr_ctrl_start, arr_ctrl_b_en, arr_ctrl_a_valid;
+	wire arr_ctrl_b_en, arr_ctrl_a_valid;
 	wire [LANE_W-1:0] arr_ctrl_b_lane;
 	wire [ROW_W-1:0] arr_ctrl_b_wdata, arr_ctrl_ld_a;
 
-	wire arr_ctrl_busy, arr_ctrl_w_valid, ping_pong_sel;
+	wire arr_ctrl_busy, arr_ctrl_w_valid, ping_pong_sel, arr_reserve;
 	wire array_done, array_busy;
 
 	// result capture path
 	wire [MATRIX_SIZE*RESULT_W-1:0] arr_result_data;
 	wire [MATRIX_SIZE-1:0] arr_result_valid;
 	wire fifo_room, fifo_valid, fifo_overflow, fifo_rd;
-	wire signed [RESULT_W-1:0] fifo_rdata;
-	wire [5:0] fifo_level;
+	wire [AXI_DATA_W-1:0] fifo_rdata; // tight-packed RESULT_W results
+	wire [LEVEL_W-1:0] fifo_level;
 
-	wire [31:0] csr_result = {{(32-RESULT_W){fifo_rdata[RESULT_W-1]}}, fifo_rdata}; // extend csr readback
+	wire [31:0] csr_result = fifo_rdata; // same packed word the store dma writes
 
 	// result store dma
-	wire wdma_busy, wdma_done, wdma_err, wdma_fifo_rd, csr_result_rd;
+	wire wdma_busy, wdma_done, wdma_err, wdma_resp, wdma_last_beat, wdma_fifo_rd, csr_result_rd;
 	assign fifo_rd = wdma_busy ? wdma_fifo_rd : csr_result_rd;
 
 	// result store
-	localparam integer TILE_BEATS = MATRIX_SIZE * MATRIX_SIZE; // 16
-	localparam integer TILE_BYTES = TILE_BEATS * 4; // 64, one INCR burst
+	localparam integer TILE_BEATS = TILE_BITS / AXI_DATA_W; // 9
+	localparam integer TILE_BYTES = TILE_BEATS * 4; // 36
 
-	wire tile_ready = (fifo_level >= 6'(TILE_BEATS));
-	wire wdma_start = wdma_start_manual || (auto_st_en && tile_ready && !wdma_busy);
+	wire tile_ready = (fifo_level >= LEVEL_W'(MATRIX_SIZE)); // a whole tile resident
+	wire wdma_start = wdma_start_manual || (auto_st_en && tile_ready && (!wdma_busy || wdma_last_beat));
 	wire aw_fire = o_m_axi_awvalid && i_m_axi_awready;
 
 	logic [31:0] dst_ptr_r;
@@ -188,20 +200,13 @@ module top #(
 		end
 	end
 
-	logic wdma_done_r;
-	always_ff @(posedge clk or negedge resetn_synced) begin
-		if (!resetn_synced) wdma_done_r <= 1'b0;
-		else wdma_done_r <= wdma_done;
-	end
-	wire wdma_done_edge = wdma_done && !wdma_done_r;
-
 	logic [3:0] tile_cnt_r;
 	always_ff @(posedge clk or negedge resetn_synced) begin
 		if (!resetn_synced) begin
 			tile_cnt_r <= '0;
 		end else if (auto_st_arm) begin
 			tile_cnt_r <= '0;
-		end else if (wdma_done_edge) begin
+		end else if (wdma_resp) begin
 			tile_cnt_r <= tile_cnt_r + 1'b1;
 		end
 	end
@@ -257,7 +262,7 @@ module top #(
 		csr_status[ST_WDMA_DONE] = wdma_done;
 		csr_status[ST_WDMA_ERR] = wdma_err;
 		csr_status[ST_AF_BUSY] = auto_fill_pend;
-		csr_status[ST_LEVEL_LSB +: 6] = fifo_level;
+		csr_status[ST_LEVEL_LSB +: LEVEL_W] = fifo_level;
 		csr_status[ST_TILE_LSB +: 4] = tile_cnt_r;
 	end
 
@@ -294,13 +299,16 @@ module top #(
 
 	axi4_dma_wr #(
 		.AXI_ADDR_W (AXI_ADDR_W),
-		.BEATS      (MATRIX_SIZE*MATRIX_SIZE)
+		.AXI_ID_W   (AXI_ID_W),
+		.BEATS      (TILE_BEATS)
 	) u_wdma (
 		.clk          (clk),
 		.rstn         (resetn_synced),
 		.i_dst_addr   (wdma_dst),
 		.i_start      (wdma_start),
 		.o_busy       (wdma_busy),
+		.o_resp       (wdma_resp),
+		.o_last_beat  (wdma_last_beat),
 		.o_done       (wdma_done),
 		.o_err        (wdma_err),
 		.o_m_awid     (o_m_axi_awid),
@@ -308,7 +316,6 @@ module top #(
 		.o_m_awlen    (o_m_axi_awlen),
 		.o_m_awsize   (o_m_axi_awsize),
 		.o_m_awburst  (o_m_axi_awburst),
-		.o_m_awlock   (o_m_axi_awlock),
 		.o_m_awcache  (o_m_axi_awcache),
 		.o_m_awprot   (o_m_axi_awprot),
 		.o_m_awvalid  (o_m_axi_awvalid),
@@ -328,6 +335,7 @@ module top #(
 
 	axi4_dma #(
 		.AXI_ADDR_W  (AXI_ADDR_W),
+		.AXI_ID_W    (AXI_ID_W),
 		.SRAM_ADDR_W (SRAM_ADDR_W)
 	 ) u_dma (
 		.clk         (clk),
@@ -343,7 +351,6 @@ module top #(
 		.o_m_arlen   (o_m_axi_arlen),
 		.o_m_arsize  (o_m_axi_arsize),
 		.o_m_arburst (o_m_axi_arburst),
-		.o_m_arlock  (o_m_axi_arlock),
 		.o_m_arcache (o_m_axi_arcache),
 		.o_m_arprot  (o_m_axi_arprot),
 		.o_m_arvalid (o_m_axi_arvalid),
@@ -394,13 +401,13 @@ module top #(
 		.o_cs_array    (arr_ctrl_cs_p1),
 		.o_addr_array  (arr_ctrl_addr),
 		.i_array_rdata (sram_rdata),
-		.o_start       (arr_ctrl_start),
 		.o_b_en        (arr_ctrl_b_en),
 		.o_b_lane      (arr_ctrl_b_lane),
 		.o_b_wdata     (arr_ctrl_b_wdata),
 		.o_a_valid     (arr_ctrl_a_valid),
 		.o_ld_a        (arr_ctrl_ld_a),
-		.i_sys_done    (array_done),
+		.i_array_busy  (array_busy),
+		.o_reserve     (arr_reserve),
 		.o_busy        (arr_ctrl_busy),
 		.o_w_valid     (arr_ctrl_w_valid)
 	);
@@ -411,7 +418,6 @@ module top #(
 	) u_array (
 		.clk            (clk),
 		.rstn           (resetn_synced),
-		.i_start        (arr_ctrl_start),
 		.i_a_valid      (arr_ctrl_a_valid),
 		.i_ld_a         (arr_ctrl_ld_a),
 		.i_b_en         (arr_ctrl_b_en),
@@ -425,12 +431,15 @@ module top #(
 
 	res_cap_fifo #(
 		.MATRIX_SIZE (MATRIX_SIZE),
-		.DATA_WIDTH  (DATA_WIDTH)
+		.DATA_WIDTH  (DATA_WIDTH),
+		.BEAT_W      (AXI_DATA_W),
+		.JOBS        (RES_JOBS)
 	) u_res_fifo (
 		.clk            (clk),
 		.rstn           (resetn_synced),
 		.i_result_valid (arr_result_valid),
 		.i_result_data  (arr_result_data),
+		.i_reserve      (arr_reserve),
 		.o_room         (fifo_room),
 		.rd_en          (fifo_rd),
 		.o_rdata        (fifo_rdata),
