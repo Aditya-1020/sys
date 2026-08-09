@@ -94,10 +94,14 @@ module tb_top;
 
 	always #CLK_HALF clk = ~clk;
 
+`ifdef GL
+	top dut (
+`else
 	top #(
 		.AXI_ADDR_W(32),
 		.AXI_DATA_W(32)
 	) dut (
+`endif
 		.clk(clk),
 		.rstn(rstn),
 
@@ -299,6 +303,7 @@ module tb_top;
 		end
 	end
 
+	// synthesis flattens these away, so the white-box probes are RTL-only
 	logic prev_cs_array, prev_ovf;
 	always @(posedge clk) begin
 		if (!rstn) begin
@@ -310,11 +315,13 @@ module tb_top;
 			if (o_m_axi_awvalid && (o_m_axi_awaddr[1:0] !== 2'b00))
 				fail("awaddr is not word aligned");
 
+`ifndef GL
 			if (dut.u_sram.i_swap && (dut.u_sram.i_cs_array || prev_cs_array))
 				fail("i_swap collided with an array read");
 			if (dut.fifo_overflow && !prev_ovf) fail("result fifo overflowed");
 			prev_cs_array <= dut.u_sram.i_cs_array;
 			prev_ovf <= dut.fifo_overflow;
+`endif
 		end
 	end
 
@@ -490,6 +497,7 @@ module tb_top;
 	task automatic check_geometry;
 		begin
 			phase = "geometry";
+`ifndef GL
 			expect_eq("MATRIX_SIZE", 32'(dut.MATRIX_SIZE), 32'(MATRIX_SIZE));
 			expect_eq("DATA_WIDTH", 32'(dut.DATA_WIDTH), 32'(DATA_WIDTH));
 			expect_eq("RESULT_W", 32'(dut.RESULT_W), 32'(RESULT_W));
@@ -497,6 +505,7 @@ module tb_top;
 			expect_eq("TILE_BYTES", 32'(dut.TILE_BYTES), 32'(TILE_BYTES));
 			expect_eq("LEVEL_W", 32'(dut.LEVEL_W), 32'(LEVEL_W));
 			expect_eq("ST_TILE_LSB", 32'(dut.ST_TILE_LSB), 32'(ST_TILE_LSB));
+`endif
 			expect_eq("golden image size", 32'(GOLD_WORDS), 32'(TILES * TILE_BEATS));
 			expect_eq("stim image size", 32'(STIM_WORDS), 32'(WEIGHTS_JOB + ((TILES - 1) * TILE_WORDS)));
 		end
@@ -643,9 +652,16 @@ module tb_top;
 		$fatal(1, "tb_top: watchdog");
 	end
 
+	string wave_file;
+
 	initial begin
-		$dumpfile("tb_top.vcd");
+		if (!$value$plusargs("wave=%s", wave_file)) wave_file = "tb_top.vcd";
+		$dumpfile(wave_file);
+`ifdef GL
+		$dumpvars(1, tb_top);
+`else
 		$dumpvars(0, tb_top);
+`endif
 
 		errors = 0;
 		checks = 0;

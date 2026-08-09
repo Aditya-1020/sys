@@ -1,6 +1,5 @@
 RTL_DIR = rtl
 TB_DIR = tb
-CONSTRAINTS_DIR = constraints
 BUILD_DIR = build
 VERILOG_SV2V = verilog_sv2v
 
@@ -44,18 +43,13 @@ TB_TOP ?= tb_top
 TB_SRC = $(TB_DIR)/$(TB_TOP).sv
 SIM_MODELS = $(foreach m,$(V_MODELS), $(if $(wildcard $(SRAM_DIR)/$(notdir $(m))),$(SRAM_DIR)/$(notdir $(m)),$(m)))
 
-IVERILOG ?= iverilog
-VVP ?= vvp
-TB_VVP = $(BUILD_DIR)/$(TB_TOP).vvp
-TB_VCD = $(BUILD_DIR)/$(TB_TOP).vcd
-
 XVLOG ?= xvlog
 XELAB ?= xelab
 XSIM ?= xsim
 XSIM_DIR = $(BUILD_DIR)/xsim
 XSIM_SNAP = $(TB_TOP)_snap
 
-.PHONY: all venv cocotb tb xrun prof vectors waves tb-waves xrun-waves sv2v_rtl synth sta sta-shell sta-probe lint sram liblane lib-last_run report clean
+.PHONY: all venv cocotb xrun gl gl-waves prof vectors waves xrun-waves sv2v_rtl synth sta sta-shell lint sram liblane lib-last_run report clean
 
 all: cocotb
 
@@ -87,11 +81,7 @@ vectors: $(VECTORS)
 
 TB_PLUSARGS = +stim=$(CURDIR)/$(TB_DIR)/vectors/stim.hex +gold=$(CURDIR)/$(TB_DIR)/vectors/golden.hex
 
-$(TB_VVP): $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
-	$(IVERILOG) -g2012 -I$(TB_DIR) -s $(TB_TOP) -o $@ $(SV_RTL) $(SIM_MODELS) $(TB_SRC)
-
-tb: $(TB_VVP)
-	$(VVP) $< +wave=$(TB_VCD) $(TB_PLUSARGS)
+XSIM_ARGS = -runall $(addprefix -testplusarg ,$(subst +,,$(TB_PLUSARGS)))
 
 xrun: $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
 	@mkdir -p $(XSIM_DIR)
@@ -99,7 +89,7 @@ xrun: $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
 		$(XVLOG) --sv -i $(CURDIR)/$(TB_DIR) $(addprefix $(CURDIR)/,$(SV_RTL) $(TB_SRC)) && \
 		$(XVLOG) $(addprefix $(CURDIR)/,$(SIM_MODELS)) && \
 		$(XELAB) -debug typical -timescale 1ps/1ps -top $(TB_TOP) -snapshot $(XSIM_SNAP) && \
-		$(XSIM) $(XSIM_SNAP) -runall -testplusarg wave=$(TB_TOP).vcd $(addprefix -testplusarg ,$(subst +,,$(TB_PLUSARGS)))
+		$(XSIM) $(XSIM_SNAP) -testplusarg wave=$(TB_TOP).vcd $(XSIM_ARGS)
 
 waves:
 	gtkwave $(BUILD_DIR)/cocotb/top.fst &
@@ -143,16 +133,36 @@ $(SRAM_MAGLEF): $(SRAM_LEF_OUT) scripts/sram_maglef.tcl
 
 sram: $(SRAM_LIBS) $(SRAM_LEF_OUT) $(SRAM_GDS_OUT) $(SRAM_MAGLEF)
 
-RUN ?=
-LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
-LL_RENDER := $(if $(RUN),--run-tag $(RUN),--last-run)
-LL_RUNDIR := $(if $(RUN),runs/$(RUN),runs/RUN_*)
+GL_NL := $(if $(RUN),runs/$(RUN)/final/nl/top.nl.v,$(shell ls -t runs/*/final/nl/top.nl.v 2>/dev/null | head -1))
+GL_PDK_VERILOG := $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog
+GL_PDK_MODELS := $(BUILD_DIR)/primitives.patched.v $(BUILD_DIR)/sky130_fd_sc_hd.patched.v
+GL_UNIT_DELAY ?= \#1
+GL_DEFS = -d GL -d FUNCTIONAL -d 'UNIT_DELAY=$(GL_UNIT_DELAY)'
 
-liblane: $(V_RTL)
-	librelane $(LL_RUN) --to KLayout.StreamOut $(LIBLANE_CONFIG)
-	klayout -b -r scripts/strip_orphan_tops.py \
-		-rd gds=$$(ls -dt $(LL_RUNDIR)/*-magic-streamout/top.gds | head -1) -rd top=top
-	librelane $(LL_RENDER) --from KLayout.Render $(LIBLANE_CONFIG)
+GL_TAG := $(subst /,_,$(patsubst runs/%,%,$(patsubst %/final/nl/top.nl.v,%,$(GL_NL))))
+GL_XSIM_DIR = $(BUILD_DIR)/xsim_gl_$(GL_TAG)
+GL_SNAP = $(TB_TOP)_gl_snap
+GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
+
+
+$(BUILD_DIR)/%.patched.v: $(GL_PDK_VERILOG)/%.v Makefile | $(BUILD_DIR)
+	sed -E -e 's:^([ \t]*`(endif|else))[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$$:\1 // \3:' \
+	       -e 's:^[ \t]*`default_nettype[ \t]+none[ \t]*$$:`default_nettype wire:' $< > $@
+
+gl: $(VECTORS) $(GL_PDK_MODELS)
+	@test -n "$(GL_NL)" || { echo "no netlist found: set RUN=<tag> or GL_NL=<path>"; exit 1; }
+	@test -f "$(GL_NL)" || { echo "missing netlist: $(GL_NL)"; exit 1; }
+	@echo "gate-level sim on $(GL_NL)"
+	@mkdir -p $(GL_XSIM_DIR)
+	cd $(GL_XSIM_DIR) && \
+		$(XVLOG) $(GL_DEFS) $(addprefix $(CURDIR)/,$(GL_PDK_MODELS)) && \
+		$(XVLOG) $(addprefix $(CURDIR)/,$(SIM_MODELS) $(GL_NL)) && \
+		$(XVLOG) --sv $(GL_DEFS) -i $(CURDIR)/$(TB_DIR) $(CURDIR)/$(TB_SRC) && \
+		$(XELAB) -debug typical -timescale 1ps/1ps -top $(TB_TOP) -snapshot $(GL_SNAP) && \
+		$(XSIM) $(GL_SNAP) -testplusarg wave=$(notdir $(GL_VCD)) $(XSIM_ARGS)
+
+gl-waves:
+	gtkwave $(GL_VCD) &
 
 lib-last_run:
 	librelane --last-run --flow openinopenroad $(LIBLANE_CONFIG)
@@ -162,4 +172,4 @@ report:
 
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) tb/__pycache__ tb/*.xml
-	rm -rf *.log *.vcd *.fst
+	rm -rf *.log *.vcd *.fst *.pb

@@ -1,4 +1,3 @@
-// reset release for macro (had to cause keep didnt preserve the registers)
 `default_nettype none
 `timescale 1ps/1ps
 
