@@ -10,7 +10,7 @@ set_timing_derate -early 0.99
 set_timing_derate -late  1.01
 
 # 0.65
-set_max_transition 0.85 [current_design]
+set_max_transition 1.6 [current_design]
 set_max_fanout 16 [current_design]
 
 set_false_path -from [get_ports rstn]
