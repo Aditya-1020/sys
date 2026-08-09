@@ -1,5 +1,9 @@
 # sky130 4×4 int8 systolic matmul accelerator
 
+<img src="image.png" alt="Routed layout of the final run" width="480">
+
+*Final routed layout, `runs/final`: two `sram22_64x32m4w8` macros over the 4×4 array logic.*
+
 Weight-stationary 4×4 int8 matrix-multiply accelerator with AXI4-Lite control,
 two AXI4 master DMA ports and a ping-pong SRAM-macro input buffer. RTL to GDSII
 on sky130A with LibreLane.
