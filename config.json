@@ -30,13 +30,7 @@
 	"SYNTH_CLOCKGATE_POSEDGE_ICG": "sky130_fd_sc_hd__dlclkp_2/GATE/CLK/GCLK",
 	"EXTRA_EXCLUDED_CELLS": ["sky130_fd_sc_hd__dly*", "sky130_fd_sc_hd__clkdlybuf*"],
 
-	
-	"RSZ_DONT_TOUCH_LIST": [
-		"u_sram.u_m0_rstb",
-		"u_sram.u_m1_rstb"
-	],
-
-	"CTS_SINK_CLUSTERING_SIZE": 16,
+	"CTS_SINK_CLUSTERING_SIZE": 10,
 	"CTS_SINK_CLUSTERING_MAX_DIAMETER": 40,
 	"CTS_ROOT_BUFFER": "sky130_fd_sc_hd__clkbuf_16",
 	"CTS_CLK_BUFFERS": ["sky130_fd_sc_hd__clkbuf_4", "sky130_fd_sc_hd__clkbuf_8", "sky130_fd_sc_hd__clkbuf_16"],

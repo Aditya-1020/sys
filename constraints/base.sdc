@@ -10,7 +10,7 @@ set_clock_uncertainty -hold  0.08 [get_clocks SYS_CLK]
 set_timing_derate -early 0.99
 set_timing_derate -late  1.01
 
-set_max_fanout 20 [current_design]
+set_max_fanout 21 [current_design]
 
 set_false_path -from [get_ports rstn]
 

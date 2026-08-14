@@ -3,29 +3,21 @@ import os
 import re
 import shutil
 import sys
-
 from librelane.common.misc import slugify
 from librelane.flows.flow import Flow
 
-from steps import CellResize
-
 PROJECT = os.path.dirname(os.path.abspath(__file__))
 RUN_DIR = os.path.join(PROJECT, "runs", "Final")
-RUN_NAME = "Final"
+RUN_NAME = "Fanout-fix"
 PDK = "sky130A"
 SCL = "sky130_fd_sc_hd"
 
 Classic = Flow.factory.get("Classic")
-steps = list(Classic.Steps)
-steps.insert(35, CellResize)  # immediately after CTS
-
 
 class CustomFlow(Classic):
-	Steps = steps
-
+	pass
 
 _STEP_DIR = re.compile(r"^(\d+)-(.+)$")
-
 
 def resolve_step_id(name: str) -> str:
 	needle = name.lower()
