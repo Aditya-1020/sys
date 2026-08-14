@@ -31,9 +31,13 @@ TT_SYNTH_LIB := $(TRIM_LIB)
 TT_STA_LIB := $(FULL_LIB)
 STA_SRAM_LIB := $(SRAM_BUILD)/$(SRAM_DIR)_tt_025C_1v80.lib
 
+BASE_SDC_FILE := constraints/base.sdc
+
+
 export TT_STA_LIB
 export TT_SYNTH_LIB
 export STA_SRAM_LIB
+export BASE_SDC_FILE
 
 SYNTH_TOP ?= systolic_array
 SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
@@ -173,3 +177,4 @@ report:
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) tb/__pycache__ tb/*.xml
 	rm -rf *.log *.vcd *.fst *.pb
+	rm -rf __pycache__ .pytest_cache

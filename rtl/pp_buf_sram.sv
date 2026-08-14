@@ -27,7 +27,7 @@ module pp_buf_sram (
 	(* keep *) logic ping_pong_sel_m1_r;
 	logic ping_pong_sel_d1_r;
 
-	logic [31:0] dma_wdata_r;
+	(* keep *) logic [31:0] dma_wdata_m0_r, dma_wdata_m1_r;
 	logic [3:0] dma_mask_r;
 	logic dma_cs_r, dma_we_r;
 	logic [5:0] dma_addr_r;
@@ -43,9 +43,10 @@ module pp_buf_sram (
 	end
 
 	always_ff @(posedge clk) begin
-	    dma_wdata_r <= i_dma_wdata;
-	    dma_mask_r  <= i_dma_mask;
-	    dma_addr_r  <= i_dma_addr;
+		dma_wdata_m0_r <= i_dma_wdata;
+		dma_wdata_m1_r <= i_dma_wdata;
+		dma_mask_r  <= i_dma_mask;
+		dma_addr_r  <= i_dma_addr;
 	end
 
 	always_ff @(posedge clk or negedge rstn) begin
@@ -84,7 +85,7 @@ module pp_buf_sram (
 		.we(m0_we),
 		.wmask(dma_mask_r),
 		.addr(m0_addr),
-		.din(dma_wdata_r),
+		.din(dma_wdata_m0_r),
 		.dout(m0_dout)
 	);
 
@@ -95,7 +96,7 @@ module pp_buf_sram (
 		.we(m1_we),
 		.wmask(dma_mask_r),
 		.addr(m1_addr),
-		.din(dma_wdata_r),
+		.din(dma_wdata_m1_r),
 		.dout(m1_dout)
 	);
 

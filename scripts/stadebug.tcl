@@ -34,7 +34,6 @@ foreach {corner_name corner_object} [lln::get_corner_dict] {
     break
 }
 
-
 set ::_fields {slew cap input net fanout}
 
 proc worst {{n 5}} {
