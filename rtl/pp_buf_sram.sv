@@ -18,9 +18,34 @@ module pp_buf_sram (
 );
 	wire [31:0] m0_dout, m1_dout;
 
-	(* keep *)	wire m0_rstb, m0_access_en, m1_rstb, m1_access_en;
-	(* keep *)	sram_rst_rel u_rel_m0 (.clk(clk), .rstn(rstn), .o_rstb(m0_rstb), .o_access_en(m0_access_en));
-	(* keep *)	sram_rst_rel u_rel_m1 (.clk(clk), .rstn(rstn), .o_rstb(m1_rstb), .o_access_en(m1_access_en));
+	// Separate release chains so opt_merge cannot collapse both macros onto one flop.
+	(* keep *) logic [1:0] m0_rel_r;
+	(* keep *) logic m1_rel_a, m1_rel_b;
+	(* keep *) wire m0_rstb, m0_access_en, m1_rstb, m1_access_en;
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			m0_rel_r <= 2'b00;
+		end else begin
+			m0_rel_r <= {m0_rel_r[0], 1'b1};
+		end
+	end
+
+	assign m0_rstb = m0_rel_r[0];
+	assign m0_access_en = m0_rel_r[1];
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			m1_rel_a <= 1'b0;
+			m1_rel_b <= 1'b0;
+		end else begin
+			m1_rel_a <= m1_rel_a | 1'b1;
+			m1_rel_b <= m1_rel_a;
+		end
+	end
+
+	assign m1_rstb = m1_rel_b;
+	assign m1_access_en = m1_rel_a & m1_rel_b;
 
 	(* keep *) logic ping_pong_sel_r;
 	(* keep *) logic ping_pong_sel_m0_r;
@@ -32,6 +57,11 @@ module pp_buf_sram (
 	logic dma_cs_r, dma_we_r;
 	logic [5:0] dma_addr_r;
 
+	wire m0_dma_sel = !ping_pong_sel_m0_r;
+	wire m1_dma_sel = ping_pong_sel_m1_r;
+	wire m0_wdata_en = i_dma_cs && i_dma_we && m0_dma_sel;
+	wire m1_wdata_en = i_dma_cs && i_dma_we && m1_dma_sel;
+
 	always_ff @(posedge clk or negedge rstn) begin
 	    if (!rstn) begin
 	        dma_cs_r <= 1'b0;
@@ -42,11 +72,22 @@ module pp_buf_sram (
 	    end
 	end
 
-	always_ff @(posedge clk) begin
-		dma_wdata_m0_r <= i_dma_wdata;
-		dma_wdata_m1_r <= i_dma_wdata;
-		dma_mask_r  <= i_dma_mask;
-		dma_addr_r  <= i_dma_addr;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			dma_wdata_m0_r <= '0;
+			dma_wdata_m1_r <= '0;
+			dma_mask_r <= '0;
+			dma_addr_r <= '0;
+		end else begin
+			dma_mask_r <= i_dma_mask;
+			dma_addr_r <= i_dma_addr;
+			if (m0_wdata_en) begin
+				dma_wdata_m0_r <= i_dma_wdata;
+			end
+			if (m1_wdata_en) begin
+				dma_wdata_m1_r <= i_dma_wdata;
+			end
+		end
 	end
 
 	always_ff @(posedge clk or negedge rstn) begin
@@ -67,8 +108,8 @@ module pp_buf_sram (
 
 	assign o_ping_pong_sel = ping_pong_sel_r;
 
-	wire m0_dma = (ping_pong_sel_m0_r == 1'b0);
-	wire m1_dma = (ping_pong_sel_m1_r == 1'b1);
+	wire m0_dma = m0_dma_sel;
+	wire m1_dma = m1_dma_sel;
 
 	wire m0_ce = m0_access_en && (m0_dma ? dma_cs_r : i_cs_array);
 	wire m0_we = m0_dma ? dma_we_r : 1'b0;
