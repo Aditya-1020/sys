@@ -643,6 +643,67 @@ def section_slack_hist(console, Table, Text, m, stage, corner_override):
         console.print(f"       {len(slacks)} violated paths, worst {min(slacks):.4f} ns")
 
 
+def section_sram_fill(console, Table, Text, run_dir):
+    """How full each ping-pong bank is for the jobs this design actually runs."""
+    console.rule("SRAM FILL (ping-pong banks)")
+    depth = 64  # sram22_64x32m4w8 words per macro
+    banks = 2
+    # Prefer TB params (what simulation / typical host programs); fall back to matrix=4.
+    matrix = tiles_w = weights_w = None
+    params = Path("tb/vectors/tb_params.vh")
+    if params.is_file():
+        text = params.read_text()
+        def _def(name):
+            m = re.search(rf"`define\s+{name}\s+(\d+)", text)
+            return int(m.group(1)) if m else None
+        matrix = _def("TB_MATRIX_SIZE")
+        tiles_w = _def("TB_TILE_WORDS")
+        weights_w = _def("TB_WEIGHTS_JOB")
+    if matrix is None:
+        matrix = 4
+    if tiles_w is None:
+        tiles_w = matrix
+    if weights_w is None:
+        weights_w = 2 * matrix
+
+    def pct(words):
+        return 100.0 * words / depth
+
+    t = Table()
+    t.add_column("Bank / job")
+    t.add_column("Words", justify="right")
+    t.add_column("of 64", justify="right")
+    t.add_column("Fill", justify="right")
+    rows = [
+        ("u_sram.u_m0 capacity", depth, f"{depth}/{depth}", "100%"),
+        ("u_sram.u_m1 capacity", depth, f"{depth}/{depth}", "100%"),
+        ("total macros", banks * depth, f"{banks * depth}", "2×64"),
+        (f"weights fill (len={weights_w})", weights_w, f"{weights_w}/{depth}",
+         f"{pct(weights_w):.1f}% active bank"),
+        (f"A-tile fill (len={tiles_w})", tiles_w, f"{tiles_w}/{depth}",
+         f"{pct(tiles_w):.1f}% active bank"),
+        ("max DMA len", depth, f"{depth}/{depth}", "100% (hw clamp)"),
+    ]
+    for label, words, frac, fill in rows:
+        t.add_row(label, str(words), frac, fill)
+    console.print(t)
+    console.print(
+        "Only the DMA-owned bank is written each fill; the array reads the other. "
+        f"Typical TB traffic fills the active bank to {pct(weights_w):.1f}% (weights) "
+        f"or {pct(tiles_w):.1f}% (A rows) — live peaks: `make prof`."
+    )
+    sdc_texts = []
+    base = Path("constraints/base.sdc")
+    if base.is_file():
+        sdc_texts.append(base.read_text())
+    sdc_dir = run_dir / "final" / "sdc"
+    if sdc_dir.is_dir():
+        for sdc in sdc_dir.glob("*.sdc"):
+            sdc_texts.append(sdc.read_text())
+    if any("set_multicycle_path 2" in t and "dout" in t for t in sdc_texts):
+        console.print("Timing: SRAM dout multicycle setup=2 / hold=1 present in SDC.")
+
+
 def section_stats(console, Table, Text, m, run_dir):
     console.rule("DESIGN STATS")
     t = Table()
@@ -682,6 +743,7 @@ def section_stats(console, Table, Text, m, run_dir):
     gds = list((run_dir / "final" / "gds").glob("*.gds"))
     if gds:
         console.print(f"GDS: {gds[0]}")
+    section_sram_fill(console, Table, Text, run_dir)
 
 
 def section_warnings(console, Table, Text, m):

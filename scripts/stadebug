@@ -1,68 +1,87 @@
 #!/usr/bin/env bash
-# stadebug — interactive OpenSTA/OpenROAD session preloaded with a LibreLane run.
-#
-# Reuses LibreLane's own STA machinery (scripts/openroad/common/io.tcl:
-# read_liberty / read_verilog / read_sdc / read_spef / corner setup) instead of
-# rebuilding the session by hand. The per-corner environment is reconstructed
-# from what the STAPostPNR step actually did: the exact file list is parsed out
-# of the step's own sta.log, and the step's saved _env_*.tcl provides the rest.
-# That reconstruction lives in scripts/lib/librelane_env.sh, shared with
-# scripts/stapath.
-#
-# For batch/repeatable path queries rather than an interactive poke, see
-# scripts/stapath.
-#
-# Usage:
-#   scripts/stadebug                          latest run, default corner
-#   scripts/stadebug <run>                    specific run (name under runs/ or path)
-#   scripts/stadebug -c nom_ss_100C_1v60      pick corner
-#   scripts/stadebug -l                       list available corners
-#   scripts/stadebug --gui                    OpenROAD GUI (layout + timing)
+# Interactive OpenSTA/OpenROAD on a LibreLane post-PnR STA step.
+# Usage: scripts/stadebug [run] [-c corner] [-l] [--gui]
 set -euo pipefail
 
-# shellcheck source=lib/librelane_env.sh
-source "$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/lib/librelane_env.sh"
-
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 RUN="" CORNER="" GUI=0 LIST=0
+
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -c|--corner) CORNER="$2"; shift 2 ;;
-        --gui) GUI=1; shift ;;
-        -l|--list-corners) LIST=1; shift ;;
-        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \?//'; exit 0 ;;
-        -*) echo "error: unknown flag $1 (see --help)" >&2; exit 1 ;;
-        *) RUN="$1"; shift ;;
-    esac
+	case "$1" in
+		-c|--corner) CORNER="$2"; shift 2 ;;
+		--gui) GUI=1; shift ;;
+		-l|--list-corners) LIST=1; shift ;;
+		-h|--help) sed -n '2,4p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-*) echo "error: unknown flag $1" >&2; exit 1 ;;
+		*) RUN="$1"; shift ;;
+	esac
 done
 
-# --- resolve run / STA step / corner -----------------------------------------
-RUN_DIR=$(ll_resolve_run "$RUN")
-STA_DIR=$(ll_sta_dir "$RUN_DIR" openroad-stapostpnr)
+resolve_run() {
+	local arg="${1:-}"
+	if [[ -z "$arg" ]]; then
+		local newest
+		newest=$(ls -td "$ROOT"/runs/*/final/metrics.json 2>/dev/null | head -1 || true)
+		[[ -n "$newest" ]] || { echo "error: no runs under $ROOT/runs" >&2; exit 1; }
+		dirname "$(dirname "$newest")"
+		return
+	fi
+	if [[ -d "$arg" ]]; then
+		echo "$(cd "$arg" && pwd)"
+	elif [[ -d "$ROOT/runs/$arg" ]]; then
+		echo "$ROOT/runs/$arg"
+	else
+		echo "error: run not found: $arg" >&2
+		exit 1
+	fi
+}
+
+RUN_DIR=$(resolve_run "$RUN")
+STA_DIR=$(ls -d "$RUN_DIR"/*-openroad-stapostpnr 2>/dev/null | head -1 || true)
+[[ -n "$STA_DIR" ]] || { echo "error: no openroad-stapostpnr step in $RUN_DIR" >&2; exit 1; }
 
 if [[ $LIST -eq 1 ]]; then
-    ll_list_corners "$STA_DIR"; exit 0
+	find "$STA_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+	exit 0
 fi
 
-[[ -n "$CORNER" ]] || CORNER=$(ll_default_corner "$STA_DIR")
+if [[ -z "$CORNER" ]]; then
+	if [[ -d "$STA_DIR/nom_tt_025C_1v80" ]]; then
+		CORNER=nom_tt_025C_1v80
+	else
+		CORNER=$(find "$STA_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | head -1)
+	fi
+fi
 
-# reconstructs the step's per-corner environment from its own sta.log
-ll_export_env "$STA_DIR" "$CORNER"
-SDC="$LL_SDC"
-SPEF="$LL_SPEF"
+CORNER_DIR="$STA_DIR/$CORNER"
+[[ -d "$CORNER_DIR" ]] || { echo "error: corner $CORNER not in $STA_DIR" >&2; exit 1; }
 
-LOADER="$(cd "$(dirname "$0")" && pwd)/stadebug.tcl"
+ENV_TCL=$(ls "$CORNER_DIR"/_env_*.tcl 2>/dev/null | head -1 || true)
+[[ -n "$ENV_TCL" ]] || { echo "error: no _env_*.tcl in $CORNER_DIR" >&2; exit 1; }
+
+SCRIPTS_DIR=$(python3 -c "import librelane, os; print(os.path.join(os.path.dirname(librelane.__file__), 'scripts'))")
+export SCRIPTS_DIR
+
+LOADER=$(mktemp /tmp/stadebug_XXXXXX.tcl)
+trap 'rm -f "$LOADER"' EXIT
+cat >"$LOADER" <<EOF
+source {$ENV_TCL}
+source {$ROOT/scripts/stadebug.tcl}
+EOF
+
+SDC=$(rg -o 'set ::env\(SAVE_SDC\) (.+)$' -r '$1' "$ENV_TCL" | tr -d '"' | head -1)
 
 echo "── stadebug ──────────────────────────────────────────────"
 echo "run:    $RUN_DIR"
 echo "corner: $CORNER"
-echo "sdc:    $SDC"
-echo "spef:   ${SPEF:-none (unannotated!)}"
+echo "sdc:    ${SDC:-unknown}"
+echo "env:    $ENV_TCL"
 echo "──────────────────────────────────────────────────────────"
 
 if [[ $GUI -eq 1 ]]; then
-    exec openroad -no_splash -gui "$LOADER"
+	exec openroad -no_splash -gui "$LOADER"
 elif command -v rlwrap >/dev/null 2>&1 && [[ -t 0 ]]; then
-    exec rlwrap sta -no_splash "$LOADER"   # rlwrap: arrow-key history/editing
+	exec rlwrap sta -no_splash "$LOADER"
 else
-    exec sta -no_splash "$LOADER"
+	exec sta -no_splash "$LOADER"
 fi
