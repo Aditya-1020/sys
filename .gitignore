@@ -1,7 +1,6 @@
 # generated
 build/
 config.sweep_*.json
-
 obj_dir/
 
 # xsim
@@ -11,9 +10,6 @@ xsim.dir/
 *.pb
 *.log
 xsim_*.backup.*
-synth/*.json
-synth/*.rpt
-synth/*.v
 results.xml
 
 # waves
@@ -28,16 +24,9 @@ __pycache__/
 # editor
 .*.swp
 .vscode/
+.cursor/
 
+# local / generated
 verilog_sv2v/
 notes/
 runs/
-macrofp.py
-no-sram/
-sram/
-scripts/build_*
-scripts/stapath*
-scripts/stadebug
-scripts/stadebug.tcl
-scripts/lib
-scripts/probes

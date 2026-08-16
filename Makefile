@@ -12,39 +12,10 @@ V_MODELS = $(wildcard $(RTL_DIR)/*.v)
 V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 
 PDK_ROOT ?= $(HOME)/eda/.volare
-LIB_DIR ?= $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/lib
-MAGIC_RCFILE ?= $(PDK_ROOT)/sky130A/libs.tech/magic/sky130A.magicrc
-FULL_LIB := $(LIB_DIR)/sky130_fd_sc_hd__tt_025C_1v80.lib
-TRIM_LIB := $(BUILD_DIR)/sky130_fd_sc_hd__tt_025C_1v80.trimmed.lib
-
-SRAM_DIR := sram22_64x32m4w8
-SRAM_BUILD := $(BUILD_DIR)/$(SRAM_DIR)
-SRAM_GDS := $(SRAM_DIR)/$(SRAM_DIR).gds
-SRAM_LEF := $(SRAM_DIR)/$(SRAM_DIR).lef
-SRAM_CORNERS := tt_025C_1v80 ss_100C_1v60 ff_n40C_1v95
-SRAM_LIBS := $(patsubst %,$(SRAM_BUILD)/$(SRAM_DIR)_%.lib,$(SRAM_CORNERS))
-SRAM_LEF_OUT := $(SRAM_BUILD)/$(SRAM_DIR).lef
-SRAM_GDS_OUT := $(SRAM_BUILD)/$(SRAM_DIR).gds
-SRAM_MAGLEF := $(SRAM_DIR)/$(SRAM_DIR).mag
-
-TT_SYNTH_LIB := $(TRIM_LIB)
-TT_STA_LIB := $(FULL_LIB)
-STA_SRAM_LIB := $(SRAM_BUILD)/$(SRAM_DIR)_tt_025C_1v80.lib
-
-BASE_SDC_FILE := constraints/base.sdc
-
-
-export TT_STA_LIB
-export TT_SYNTH_LIB
-export STA_SRAM_LIB
-export BASE_SDC_FILE
-
-SYNTH_TOP ?= systolic_array
-SYNTH_V = $(BUILD_DIR)/$(SYNTH_TOP)_synth.v
-STA_TOP ?= pe
 
 TB_TOP ?= tb_top
 TB_SRC = $(TB_DIR)/$(TB_TOP).sv
+SRAM_DIR := sram22_64x32m4w8
 SIM_MODELS = $(foreach m,$(V_MODELS), $(if $(wildcard $(SRAM_DIR)/$(notdir $(m))),$(SRAM_DIR)/$(notdir $(m)),$(m)))
 
 XVLOG ?= xvlog
@@ -53,11 +24,24 @@ XSIM ?= xsim
 XSIM_DIR = $(BUILD_DIR)/xsim
 XSIM_SNAP = $(TB_TOP)_snap
 
-.PHONY: all venv cocotb xrun gl gl-waves prof vectors waves xrun-waves sv2v_rtl synth sta sta-shell lint sram liblane lib-last_run report clean
+VECTORS = $(TB_DIR)/vectors/stim.hex $(TB_DIR)/vectors/golden.hex $(TB_DIR)/vectors/tb_params.vh
+TB_PLUSARGS = +stim=$(CURDIR)/$(TB_DIR)/vectors/stim.hex +gold=$(CURDIR)/$(TB_DIR)/vectors/golden.hex
+XSIM_ARGS = -runall $(addprefix -testplusarg ,$(subst +,,$(TB_PLUSARGS)))
+
+GL_NL := $(if $(RUN),runs/$(RUN)/final/nl/top.nl.v,$(shell ls -t runs/*/final/nl/top.nl.v 2>/dev/null | head -1))
+GL_PDK_VERILOG := $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog
+GL_PDK_MODELS := $(BUILD_DIR)/primitives.patched.v $(BUILD_DIR)/sky130_fd_sc_hd.patched.v
+GL_UNIT_DELAY ?= \#1
+GL_DEFS = -d GL -d FUNCTIONAL -d 'UNIT_DELAY=$(GL_UNIT_DELAY)'
+GL_TAG := $(subst /,_,$(patsubst runs/%,%,$(patsubst %/final/nl/top.nl.v,%,$(GL_NL))))
+GL_XSIM_DIR = $(BUILD_DIR)/xsim_gl_$(GL_TAG)
+GL_SNAP = $(TB_TOP)_gl_snap
+GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
+
+.PHONY: all venv cocotb xrun gl gl-waves prof vectors waves xrun-waves \
+	sv2v_rtl lint liblane lib-last_run report sta-shell clean
 
 all: cocotb
-
-VECTORS = $(TB_DIR)/vectors/stim.hex $(TB_DIR)/vectors/golden.hex $(TB_DIR)/vectors/tb_params.vh
 
 $(VERILOG_SV2V) $(BUILD_DIR):
 	@mkdir -p $@
@@ -83,10 +67,6 @@ $(VECTORS) &: $(TB_DIR)/test_top.py
 
 vectors: $(VECTORS)
 
-TB_PLUSARGS = +stim=$(CURDIR)/$(TB_DIR)/vectors/stim.hex +gold=$(CURDIR)/$(TB_DIR)/vectors/golden.hex
-
-XSIM_ARGS = -runall $(addprefix -testplusarg ,$(subst +,,$(TB_PLUSARGS)))
-
 xrun: $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
 	@mkdir -p $(XSIM_DIR)
 	cd $(XSIM_DIR) && \
@@ -109,45 +89,25 @@ venv:
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(addprefix -v ,$(V_MODELS))
 
-$(TRIM_LIB): $(FULL_LIB) scripts/filter_lib.py | $(BUILD_DIR)
-	python3 scripts/filter_lib.py $< $@
-
-$(SYNTH_V): $(V_RTL) $(TRIM_LIB) scripts/$(SYNTH_TOP)/synth.tcl | $(BUILD_DIR)
-	yosys -c scripts/$(SYNTH_TOP)/synth.tcl
-
-synth: $(SYNTH_V)
-
-sta: $(V_RTL) $(TRIM_LIB) $(STA_SRAM_LIB) scripts/$(STA_TOP)/synth.tcl scripts/$(STA_TOP)/sta.tcl | $(BUILD_DIR)
-	yosys -c scripts/$(STA_TOP)/synth.tcl
-	sta   scripts/$(STA_TOP)/sta.tcl
-
 sta-shell:
 	scripts/stadebug $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(GUI),--gui,)
 
-$(SRAM_LIBS) $(SRAM_LEF_OUT) &: $(wildcard $(SRAM_DIR)/*.lib) $(SRAM_LEF) scripts/build_sram_macro.py | $(BUILD_DIR)
-	python3 scripts/build_sram_macro.py --src $(SRAM_DIR) --out $(SRAM_BUILD)
+RUN ?=
+LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
+LL_RENDER := $(if $(RUN),--run-tag $(RUN),--last-run)
+LL_RUNDIR := $(if $(RUN),runs/$(RUN),runs/RUN_*)
 
-$(SRAM_GDS_OUT): $(SRAM_GDS) $(SRAM_LEF) scripts/patch_sram_gds.py | $(BUILD_DIR)
-	klayout -b -r scripts/patch_sram_gds.py \
-		-rd gds=$(SRAM_GDS) -rd lef=$(SRAM_LEF) -rd out=$@
+liblane: $(V_RTL)
+	librelane $(LL_RUN) --to KLayout.StreamOut $(LIBLANE_CONFIG)
+	klayout -b -r scripts/strip_orphan_tops.py \
+		-rd gds=$$(ls -dt $(LL_RUNDIR)/*-magic-streamout/top.gds | head -1) -rd top=top
+	librelane $(LL_RENDER) --from KLayout.Render $(LIBLANE_CONFIG)
 
-$(SRAM_MAGLEF): $(SRAM_LEF_OUT) scripts/sram_maglef.tcl
-	magic -dnull -noconsole -rcfile $(MAGIC_RCFILE) \
-		scripts/sram_maglef.tcl $(SRAM_LEF_OUT) $(SRAM_DIR)
+lib-last_run:
+	librelane --last-run --flow openinopenroad $(LIBLANE_CONFIG)
 
-sram: $(SRAM_LIBS) $(SRAM_LEF_OUT) $(SRAM_GDS_OUT) $(SRAM_MAGLEF)
-
-GL_NL := $(if $(RUN),runs/$(RUN)/final/nl/top.nl.v,$(shell ls -t runs/*/final/nl/top.nl.v 2>/dev/null | head -1))
-GL_PDK_VERILOG := $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog
-GL_PDK_MODELS := $(BUILD_DIR)/primitives.patched.v $(BUILD_DIR)/sky130_fd_sc_hd.patched.v
-GL_UNIT_DELAY ?= \#1
-GL_DEFS = -d GL -d FUNCTIONAL -d 'UNIT_DELAY=$(GL_UNIT_DELAY)'
-
-GL_TAG := $(subst /,_,$(patsubst runs/%,%,$(patsubst %/final/nl/top.nl.v,%,$(GL_NL))))
-GL_XSIM_DIR = $(BUILD_DIR)/xsim_gl_$(GL_TAG)
-GL_SNAP = $(TB_TOP)_gl_snap
-GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
-
+report:
+	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)
 
 $(BUILD_DIR)/%.patched.v: $(GL_PDK_VERILOG)/%.v Makefile | $(BUILD_DIR)
 	sed -E -e 's:^([ \t]*`(endif|else))[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$$:\1 // \3:' \
@@ -167,12 +127,6 @@ gl: $(VECTORS) $(GL_PDK_MODELS)
 
 gl-waves:
 	gtkwave $(GL_VCD) &
-
-lib-last_run:
-	librelane --last-run --flow openinopenroad $(LIBLANE_CONFIG)
-
-report:
-	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)
 
 clean:
 	rm -rf $(BUILD_DIR) $(VERILOG_SV2V) tb/__pycache__ tb/*.xml
