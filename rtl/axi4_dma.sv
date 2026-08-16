@@ -69,8 +69,19 @@ module axi4_dma #(
 
 	wire idle_state = (current_state == IDLE);
 
-	assign o_m_arvalid = (current_state == ADDR);
-	assign o_m_rready = (current_state == DATA); // no sram backpressure
+	logic arvalid_r, rready_r;
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			arvalid_r <= 1'b0;
+			rready_r <= 1'b0;
+		end else begin
+			arvalid_r <= (next_state == ADDR);
+			rready_r <= (next_state == DATA);
+		end
+	end
+
+	assign o_m_arvalid = arvalid_r;
+	assign o_m_rready = rready_r; // no sram backpressure
 	assign o_dma_cs = i_m_rvalid && o_m_rready;
 
 	wire beat = o_dma_cs;

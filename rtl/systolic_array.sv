@@ -28,21 +28,10 @@ module systolic_array #(
 	localparam integer DRAIN_LAT = ARRAY_ROWS + PE_LATENCY + RESOLVE_LAT; // 8
 	localparam integer PIPE_DEPTH = DRAIN_LAT + ARRAY_COLS - 1; // 11
 
-	logic b_en_r;
-	logic [LANE_W-1:0] b_lane_r;
 	logic [ROW_W-1:0] b_wdata_r, load_a;
-
-	always_ff @(posedge clk) begin
-		if (!rstn) begin
-			b_en_r <= 1'b0;
-		end else begin
-			b_en_r <= i_b_en;
-		end
-	end
 
 	// dp
 	always_ff @(posedge clk) begin
-		b_lane_r <= i_b_lane;
 		b_wdata_r <= i_b_wdata;
 		load_a <= i_ld_a;
 	end
@@ -58,8 +47,18 @@ module systolic_array #(
 	end
 
 	// anything in flight anywhere in the array
-	wire array_active = |vld_r;
-	assign o_busy = array_active;
+	wire array_active_next = |vld_r[PIPE_DEPTH-1:0] || i_a_valid;
+
+	logic array_active_r;
+	always_ff @(posedge clk) begin
+		if (!rstn) begin
+			array_active_r <= 1'b0;
+		end else begin
+			array_active_r <= array_active_next;
+		end
+	end
+
+	assign o_busy = array_active_r;
 
 	logic [LANE_W-1:0] row_cnt_r;
 	wire a_last = i_a_valid && (row_cnt_r == LANE_W'(MATRIX_SIZE-1));
@@ -101,11 +100,17 @@ module systolic_array #(
 	endgenerate
 
 	// stationary weights; reload when empty
-	wire [ARRAY_ROWS-1:0] pe_w_load;
+	logic [ARRAY_ROWS-1:0] pe_w_load_r;
 	genvar w;
 	generate
 		for (w = 0; w < ARRAY_ROWS; w = w + 1) begin : gen_weight_load
-			assign pe_w_load[w] = !array_active && b_en_r && (b_lane_r == LANE_W'(w));
+			always_ff @(posedge clk) begin
+				if (!rstn) begin
+					pe_w_load_r[w] <= 1'b0;
+				end else begin
+					pe_w_load_r[w] <= !array_active_next && i_b_en && (i_b_lane == LANE_W'(w));
+				end
+			end
 		end
 	endgenerate
 
@@ -121,7 +126,7 @@ module systolic_array #(
 	wire signed [RESULT_WIDTH-1:0] pe_psum_s_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire signed [RESULT_WIDTH-1:0] pe_psum_c_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 
-	wire pe_en_col0 = array_active;
+	wire pe_en_col0 = array_active_r;
 
 	genvar r, c;
 	generate
@@ -135,7 +140,7 @@ module systolic_array #(
 					.clk      (clk),
 					.rstn     (rstn),
 					.i_enable (pe_en_in[r][c]),
-					.i_w_load (pe_w_load[r]),
+					.i_w_load (pe_w_load_r[r]),
 					.i_a      (pe_a_in[r][c]),
 					.i_b      (pe_w_in[r][c]),
 					.i_psum_s (pe_psum_s_in[r][c]),

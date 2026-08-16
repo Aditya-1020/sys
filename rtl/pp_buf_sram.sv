@@ -18,7 +18,6 @@ module pp_buf_sram (
 );
 	wire [31:0] m0_dout, m1_dout;
 
-	// Separate release chains so opt_merge cannot collapse both macros onto one flop.
 	(* keep *) logic [1:0] m0_rel_r;
 	(* keep *) logic m1_rel_a, m1_rel_b;
 	(* keep *) wire m0_rstb, m0_access_en, m1_rstb, m1_access_en;
@@ -53,7 +52,6 @@ module pp_buf_sram (
 	logic ping_pong_sel_d1_r;
 
 	(* keep *) logic [31:0] dma_wdata_m0_r, dma_wdata_m1_r;
-	logic [3:0] dma_mask_r;
 	logic dma_cs_r, dma_we_r;
 	logic [5:0] dma_addr_r;
 
@@ -76,10 +74,8 @@ module pp_buf_sram (
 		if (!rstn) begin
 			dma_wdata_m0_r <= '0;
 			dma_wdata_m1_r <= '0;
-			dma_mask_r <= '0;
 			dma_addr_r <= '0;
 		end else begin
-			dma_mask_r <= i_dma_mask;
 			dma_addr_r <= i_dma_addr;
 			if (m0_wdata_en) begin
 				dma_wdata_m0_r <= i_dma_wdata;
@@ -124,7 +120,7 @@ module pp_buf_sram (
 		.rstb(m0_rstb),
 		.ce(m0_ce),
 		.we(m0_we),
-		.wmask(dma_mask_r),
+		.wmask(i_dma_mask),
 		.addr(m0_addr),
 		.din(dma_wdata_m0_r),
 		.dout(m0_dout)
@@ -135,7 +131,7 @@ module pp_buf_sram (
 		.rstb(m1_rstb),
 		.ce(m1_ce),
 		.we(m1_we),
-		.wmask(dma_mask_r),
+		.wmask(i_dma_mask),
 		.addr(m1_addr),
 		.din(dma_wdata_m1_r),
 		.dout(m1_dout)

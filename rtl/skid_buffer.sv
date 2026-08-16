@@ -20,7 +20,7 @@ module skid_buffer #(
 	logic skid_valid_r, out_valid_r;
 	logic [N-1:0] skid_data_r, out_data_r;
 
-	assign o_ready = !skid_valid_r || i_ready;
+	assign o_ready = !skid_valid_r;
 	assign o_valid = out_valid_r;
 	assign o_data = out_data_r;
 
