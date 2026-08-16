@@ -1,5 +1,7 @@
 `default_nettype none
 `timescale 1ps/1ps
+
+(* keep_hierarchy *)
 module reset_sync_2ff (
     input wire i_clk,
     input wire rstn_src,   // asynchronous active-low reset
