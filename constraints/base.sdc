@@ -16,6 +16,14 @@ set_false_path -from [get_ports rstn]
 
 set_false_path -to [get_pins {u_sram.u_m0/rstb u_sram.u_m1/rstb}]
 
+# setting a myticycle path for sram dout exceeded 5ns at ss100
+set _sram_dout [get_pins -quiet {u_sram.u_m0/dout[*] u_sram.u_m1/dout[*]}]
+if {[llength $_sram_dout] > 0} {
+    set_multicycle_path 2 -setup -through $_sram_dout
+    set_multicycle_path 1 -hold  -through $_sram_dout
+}
+unset _sram_dout
+
 set_driving_cell -lib_cell sky130_fd_sc_hd__buf_4 -pin X [get_ports rstn]
 
 set AXI_INPUTS  [get_ports -quiet {i_s_axil_* i_m_axi_*}]
