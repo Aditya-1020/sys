@@ -10,7 +10,13 @@ module axi_lite_csr #(
 	localparam integer NJOBS_W = 16 // auto-fill tile count
 )(
 	input wire aclk,
+	// SYNCASYNCNET is expected: handshake/valid state below keeps async reset,
+	// config and rdata registers use sync reset to keep them off the reset
+	// leaf's RESET_B fanout. Safe because aresetn arrives via reset_gen's
+	// synchronizer + leaf chain, so it is always held for several aclk edges.
+	/* verilator lint_off SYNCASYNCNET */
 	input wire aresetn,
+	/* verilator lint_on SYNCASYNCNET */
 
 	/* verilator lint_off UNUSEDSIGNAL */
 	input wire [ADDR_WIDTH-1:0] i_s_axil_awaddr,
@@ -113,10 +119,31 @@ module axi_lite_csr #(
 		.o_data (awskd_sel)
 	);
 
-	assign wskd_valid = i_s_axil_wvalid;
-	assign wskd_data = i_s_axil_wdata;
-	assign wskd_strb = i_s_axil_wstrb;
-	assign o_s_axil_wready = axil_wr_ready;
+	logic w_full_r;
+	logic [DATA_WIDTH-1:0] w_data_r;
+	logic [(DATA_WIDTH/8)-1:0] w_strb_r;
+
+	always_ff @(posedge aclk or negedge aresetn) begin
+		if (!aresetn) begin
+			w_full_r <= 1'b0;
+		end else if (!w_full_r) begin
+			w_full_r <= i_s_axil_wvalid;
+		end else if (axil_wr_ready) begin
+			w_full_r <= 1'b0;
+		end
+	end
+
+	always_ff @(posedge aclk) begin
+		if (!w_full_r && i_s_axil_wvalid) begin
+			w_data_r <= i_s_axil_wdata;
+			w_strb_r <= i_s_axil_wstrb;
+		end
+	end
+
+	assign wskd_valid = w_full_r;
+	assign wskd_data = w_data_r;
+	assign wskd_strb = w_strb_r;
+	assign o_s_axil_wready = !w_full_r;
 
 	skid_buffer #(
 		.N(NREG)
@@ -165,7 +192,7 @@ module axi_lite_csr #(
 	assign csr_len = DATA_WIDTH'(csr_len_r);
 	assign csr_njobs = DATA_WIDTH'(csr_njobs_r);
 
-	always_ff @(posedge aclk or negedge aresetn) begin
+	always_ff @(posedge aclk) begin
 		if (!aresetn) begin
 			csr_ctrl_r <= '0;
 			csr_src_addr <= '0;
@@ -213,7 +240,7 @@ module axi_lite_csr #(
 		end
 	end
 
-	always_ff @(posedge aclk or negedge aresetn) begin
+	always_ff @(posedge aclk) begin
 		if (!aresetn) begin
 			axil_rdata_r <= '0;
 		end else if (axil_rd_ready) begin

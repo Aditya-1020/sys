@@ -136,30 +136,38 @@ module res_cap_fifo #(
 		if (!rstn) begin
 			r0_v <= 1'b0;
 			r1_v <= 1'b0;
-			r0_r <= '0;
-			r1_r <= '0;
 		end else if (row_retire) begin
 			if (r1_v) begin
-				r0_r <= r1_r;
 				r0_v <= 1'b1;
-				if (load_en) begin
-					r1_r <= mem_rd;
-					r1_v <= 1'b1;
-				end else begin
-					r1_v <= 1'b0;
-				end
+				r1_v <= load_en;
 			end else begin
-				r0_r <= mem_rd;
 				r0_v <= load_en;
 				r1_v <= 1'b0;
 			end
 		end else if (load_en) begin
 			if (!r0_v) begin
-				r0_r <= mem_rd;
 				r0_v <= 1'b1;
 			end else begin
-				r1_r <= mem_rd;
 				r1_v <= 1'b1;
+			end
+		end
+	end
+
+	always_ff @(posedge clk) begin
+		if (row_retire) begin
+			if (r1_v) begin
+				r0_r <= r1_r;
+				if (load_en) begin
+					r1_r <= mem_rd;
+				end
+			end else begin
+				r0_r <= mem_rd;
+			end
+		end else if (load_en) begin
+			if (!r0_v) begin
+				r0_r <= mem_rd;
+			end else begin
+				r1_r <= mem_rd;
 			end
 		end
 	end
