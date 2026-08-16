@@ -5,6 +5,7 @@ import shutil
 import sys
 from librelane.common.misc import slugify
 from librelane.flows.flow import Flow
+from steps import FlowSummary, SynthFanoutCheck
 
 PROJECT = os.path.dirname(os.path.abspath(__file__))
 PDK = "sky130A"
@@ -14,7 +15,10 @@ RUN_NAME = "CleanBuild"
 Classic = Flow.factory.get("Classic")
 
 class CustomFlow(Classic):
-	pass
+	Substitutions = {
+		"+Yosys.Synthesis": SynthFanoutCheck,
+		"+Misc.ReportManufacturability": FlowSummary,
+	}
 
 _STEP_DIR = re.compile(r"^(\d+)-(.+)$")
 
