@@ -8,10 +8,8 @@ from collections import Counter, namedtuple
 from os.path import commonprefix
 from pathlib import Path
 
-# --------------------------------------------------------------------------
-# rich with plain-text fallback (openlane/nix shells may lack rich)
-# --------------------------------------------------------------------------
 def _load_ui(plain):
+    """rich if available, else a plain-text shim (nix/openlane shells often lack it)."""
     if not plain:
         try:
             from rich.console import Console
@@ -61,9 +59,6 @@ def _load_ui(plain):
     return Console(), Table, Text
 
 
-# --------------------------------------------------------------------------
-# helpers
-# --------------------------------------------------------------------------
 def fnum(v, prec=4):
     if v is None:
         return "—"
@@ -151,9 +146,7 @@ def load_metrics(run_dir):
     sys.exit(f"error: no metrics found in {run_dir} (no final/, no step state_out.json)")
 
 
-# --------------------------------------------------------------------------
-# STA stages: every *-openroad-sta* step is one timing snapshot of the flow
-# --------------------------------------------------------------------------
+# Every *-openroad-sta* step is one timing snapshot of the flow.
 Stage = namedtuple("Stage", "label num dir metrics")
 
 STAGE_LABELS = {"staprepnr": "post-synth", "stapostpnr": "post-pnr"}
@@ -248,7 +241,7 @@ def pvt_worst(m, kind, pvt, corners):
     return min(vals) if vals else None
 
 
-VIOL_RE = re.compile(r"\[(\w+) ([\w.-]+)\]\s+(\S+)\s+->\s+(\S+)\s+:\s+(-?[\d.]+)")
+VIOL_RE = re.compile(r"\[(\w+) (?:[\w.-]+)\]\s+(\S+)\s+->\s+(\S+)\s+:\s+(-?[\d.]+)")
 
 
 def parse_violators(corner_dir):
@@ -258,7 +251,7 @@ def parse_violators(corner_dir):
     if not f.is_file():
         return out
     for m in VIOL_RE.finditer(f.read_text()):
-        kind, _group, start, end, slack = m.groups()
+        kind, start, end, slack = m.groups()
         if kind in out:
             out[kind].append((start, end, float(slack)))
     for k in out:
@@ -271,8 +264,7 @@ def parse_worst_path(corner_dir, which="max"):
     f = corner_dir / f"{which}.rpt"
     if not f.is_file():
         return None
-    start = end = group = None
-    slack = verdict = None
+    start = end = slack = verdict = None
     nets = []
     in_block = False
     for line in f.read_text().splitlines():
@@ -283,8 +275,6 @@ def parse_worst_path(corner_dir, which="max"):
             start = line.split()[1]
         elif in_block and line.startswith("Endpoint:"):
             end = line.split()[1]
-        elif in_block and line.startswith("Path Group:"):
-            group = line.split()[-1]
         elif in_block:
             m = re.match(r"^\s*(-?[\d.]+)\s+slack \((VIOLATED|MET)\)", line)
             if m:
@@ -295,7 +285,7 @@ def parse_worst_path(corner_dir, which="max"):
                 nets.append(m.group(1))
     if start is None:
         return None
-    return {"start": start, "end": end, "group": group,
+    return {"start": start, "end": end,
             "slack": slack, "verdict": verdict, "nets": nets}
 
 
@@ -308,9 +298,6 @@ def parse_violated_slacks(corner_dir, which="max"):
             re.findall(r"^\s*(-?[\d.]+)\s+slack \(VIOLATED\)", f.read_text(), re.M)]
 
 
-# --------------------------------------------------------------------------
-# sections
-# --------------------------------------------------------------------------
 #          label                        metric key                          severity
 CHECKS = [
     ("Magic DRC",                  "magic__drc_error__count",               "hard"),
@@ -741,7 +728,6 @@ def section_warnings(console, Table, Text, m):
     console.print(t)
 
 
-# --------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

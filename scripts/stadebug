@@ -1,29 +1,39 @@
 #!/usr/bin/env bash
-# Interactive OpenSTA/OpenROAD on a LibreLane post-PnR STA step.
-# Usage: scripts/stadebug [run] [-c corner] [-l] [--gui]
+# Interactive OpenROAD on a LibreLane STA step, with every timing corner loaded.
+# Usage: scripts/stadebug [run] [--gui] [-c corner] [-k glob] [-l] [--opensta]
+#   run        run tag or path (default: newest run under runs/ that has an STA step)
+#   --gui      OpenROAD GUI + layout; without it you get the OpenROAD shell
+#   -c corner  corner bare commands default to (default: DEFAULT_CORNER)
+#   -k glob    only load corners matching this glob, e.g. -k 'nom_*'
+#   -l         list the corners in the run and exit
+#   --opensta  use `sta` on the netlist instead of `openroad` on the .odb
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
-RUN="" CORNER="" GUI=0 LIST=0
+RUN="" CORNER="" KEEP="*" GUI=0 LIST=0 OPENSTA=0
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		-c|--corner) CORNER="$2"; shift 2 ;;
+		-k|--corners) KEEP="$2"; shift 2 ;;
 		--gui) GUI=1; shift ;;
+		--opensta) OPENSTA=1; shift ;;
 		-l|--list-corners) LIST=1; shift ;;
-		-h|--help) sed -n '2,4p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help) sed -n '2,9p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		-*) echo "error: unknown flag $1" >&2; exit 1 ;;
 		*) RUN="$1"; shift ;;
 	esac
 done
 
+# A run is usable here as soon as one STA step has produced corner directories,
+# so resolve on that rather than on final/ (which only exists once a run ends).
 resolve_run() {
 	local arg="${1:-}"
 	if [[ -z "$arg" ]]; then
 		local newest
-		newest=$(ls -td "$ROOT"/runs/*/final/metrics.json 2>/dev/null | head -1 || true)
-		[[ -n "$newest" ]] || { echo "error: no runs under $ROOT/runs" >&2; exit 1; }
-		dirname "$(dirname "$newest")"
+		newest=$(ls -td "$ROOT"/runs/*/*-openroad-sta* 2>/dev/null | head -1 || true)
+		[[ -n "$newest" ]] || { echo "error: no run with an STA step under $ROOT/runs" >&2; exit 1; }
+		dirname "$newest"
 		return
 	fi
 	if [[ -d "$arg" ]]; then
@@ -37,51 +47,75 @@ resolve_run() {
 }
 
 RUN_DIR=$(resolve_run "$RUN")
-STA_DIR=$(ls -d "$RUN_DIR"/*-openroad-stapostpnr 2>/dev/null | head -1 || true)
-[[ -n "$STA_DIR" ]] || { echo "error: no openroad-stapostpnr step in $RUN_DIR" >&2; exit 1; }
+
+# Post-PnR if it exists (real parasitics), else the latest STA step in the run.
+STA_DIR=$(ls -d "$RUN_DIR"/*-openroad-stapostpnr 2>/dev/null | sort | tail -1 || true)
+if [[ -z "$STA_DIR" ]]; then
+	STA_DIR=$(ls -d "$RUN_DIR"/*-openroad-sta* 2>/dev/null | sort -V | tail -1 || true)
+fi
+[[ -n "$STA_DIR" ]] || { echo "error: no openroad-sta* step in $RUN_DIR" >&2; exit 1; }
+
+mapfile -t ALL_CORNERS < <(find -L "$STA_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+[[ ${#ALL_CORNERS[@]} -gt 0 ]] || { echo "error: no corner directories in $STA_DIR" >&2; exit 1; }
 
 if [[ $LIST -eq 1 ]]; then
-	find "$STA_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+	printf '%s\n' "${ALL_CORNERS[@]}"
 	exit 0
 fi
 
-if [[ -z "$CORNER" ]]; then
-	if [[ -d "$STA_DIR/nom_tt_025C_1v80" ]]; then
-		CORNER=nom_tt_025C_1v80
-	else
-		CORNER=$(find "$STA_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | head -1)
-	fi
-fi
+CORNERS=()
+for c in "${ALL_CORNERS[@]}"; do
+	# shellcheck disable=SC2053  # glob match is the point
+	[[ $c == $KEEP ]] && CORNERS+=("$c")
+done
+[[ ${#CORNERS[@]} -gt 0 ]] || { echo "error: no corner in $STA_DIR matches '$KEEP'" >&2; exit 1; }
 
-CORNER_DIR="$STA_DIR/$CORNER"
-[[ -d "$CORNER_DIR" ]] || { echo "error: corner $CORNER not in $STA_DIR" >&2; exit 1; }
-
+# Every corner writes the same _env_*.tcl; only the OS environment differed.
+CORNER_DIR="$STA_DIR/${CORNERS[0]}"
 ENV_TCL=$(ls "$CORNER_DIR"/_env_*.tcl 2>/dev/null | head -1 || true)
 [[ -n "$ENV_TCL" ]] || { echo "error: no _env_*.tcl in $CORNER_DIR" >&2; exit 1; }
 
+env_get() { sed -nE "s/^set ::env\($1\) //p" "$ENV_TCL" | tail -1 | sed -E 's/^"(.*)"$/\1/'; }
+
+if [[ -z "$CORNER" ]]; then
+	CORNER=$(env_get DEFAULT_CORNER)
+fi
+printf '%s\n' "${CORNERS[@]}" | grep -qxF "$CORNER" || CORNER="${CORNERS[0]}"
+
+# The constraints the step actually read, straight from its log; the env vars
+# are only a fallback for steps whose log is missing or truncated.
+SDC=$(sed -nE "s/^Reading design constraints file at '(.*)'.*$/\1/p" "$CORNER_DIR/sta.log" 2>/dev/null | head -1 || true)
+if [[ -z "$SDC" || ! -f "$SDC" ]]; then
+	case "$STA_DIR" in
+		*stapostpnr) SDC=$(env_get SIGNOFF_SDC_FILE) ;;
+		*)           SDC=$(env_get PNR_SDC_FILE) ;;
+	esac
+fi
+[[ -n "$SDC" && -f "$SDC" ]] || SDC=$(env_get FALLBACK_SDC)
+[[ -n "$SDC" && -f "$SDC" ]] || { echo "error: could not resolve an SDC for $STA_DIR" >&2; exit 1; }
+
 SCRIPTS_DIR=$(python3 -c "import librelane, os; print(os.path.join(os.path.dirname(librelane.__file__), 'scripts'))")
+
 export SCRIPTS_DIR
-
-LOADER=$(mktemp /tmp/stadebug_XXXXXX.tcl)
-trap 'rm -f "$LOADER"' EXIT
-cat >"$LOADER" <<EOF
-source {$ENV_TCL}
-source {$ROOT/scripts/stadebug.tcl}
-EOF
-
-SDC=$(rg -o 'set ::env\(SAVE_SDC\) (.+)$' -r '$1' "$ENV_TCL" | tr -d '"' | head -1)
+export _TCL_ENV_IN="$ENV_TCL"
+export _SDC_IN="$SDC"
+export _STA_CORNERS="${CORNERS[*]}"
+export _STA_CMD_CORNER="$CORNER"
 
 echo "── stadebug ──────────────────────────────────────────────"
-echo "run:    $RUN_DIR"
-echo "corner: $CORNER"
-echo "sdc:    ${SDC:-unknown}"
-echo "env:    $ENV_TCL"
+echo "run:     $RUN_DIR"
+echo "step:    $(basename "$STA_DIR")"
+echo "corners: ${#CORNERS[@]} loaded, default $CORNER"
+echo "sdc:     $SDC"
 echo "──────────────────────────────────────────────────────────"
 
 if [[ $GUI -eq 1 ]]; then
-	exec openroad -no_splash -gui "$LOADER"
-elif command -v rlwrap >/dev/null 2>&1 && [[ -t 0 ]]; then
-	exec rlwrap sta -no_splash "$LOADER"
+	exec openroad -no_splash -gui "$ROOT/scripts/stadebug.tcl"
+elif [[ $OPENSTA -eq 1 ]]; then
+	if command -v rlwrap >/dev/null 2>&1 && [[ -t 0 ]]; then
+		exec rlwrap sta -no_splash "$ROOT/scripts/stadebug.tcl"
+	fi
+	exec sta -no_splash "$ROOT/scripts/stadebug.tcl"
 else
-	exec sta -no_splash "$LOADER"
+	exec openroad -no_splash "$ROOT/scripts/stadebug.tcl"
 fi
