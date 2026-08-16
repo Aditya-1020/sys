@@ -23,9 +23,10 @@ module systolic_array #(
 );
 	localparam integer ARRAY_ROWS = MATRIX_SIZE;
 	localparam integer ARRAY_COLS = MATRIX_SIZE;
-	localparam integer PE_LATENCY = 2; // a_r -> mult_pipe -> accumulator
-	localparam integer DRAIN_LAT = ARRAY_ROWS + PE_LATENCY; // 6
-	localparam integer PIPE_DEPTH = DRAIN_LAT + ARRAY_COLS - 1; // 9
+	localparam integer PE_LATENCY = 3; // a_r -> mult_s1 -> mult_pipe -> accumulator
+	localparam integer RESOLVE_LAT = 2; // carry-save -> binary resolve, split across 2 cycles (see gen_resolve)
+	localparam integer DRAIN_LAT = ARRAY_ROWS + PE_LATENCY + RESOLVE_LAT; // 8
+	localparam integer PIPE_DEPTH = DRAIN_LAT + ARRAY_COLS - 1; // 11
 
 	logic b_en_r;
 	logic [LANE_W-1:0] b_lane_r;
@@ -120,10 +121,16 @@ module systolic_array #(
 	wire [DATA_WIDTH-1:0] pe_a_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire [DATA_WIDTH-1:0] pe_a_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire [DATA_WIDTH-1:0] pe_w_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-	wire signed [RESULT_WIDTH-1:0] pe_psum_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
-	wire signed [RESULT_WIDTH-1:0] pe_psum_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire pe_en_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
 	wire pe_en_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	
+	// carry-save psum pair
+	wire signed [RESULT_WIDTH-1:0] pe_psum_s_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire signed [RESULT_WIDTH-1:0] pe_psum_c_in [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire signed [RESULT_WIDTH-1:0] pe_psum_s_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+	wire signed [RESULT_WIDTH-1:0] pe_psum_c_out [0:ARRAY_ROWS-1][0:ARRAY_COLS-1];
+
+	wire pe_en_col0 = array_active;
 
 	genvar r, c;
 	generate
@@ -134,20 +141,22 @@ module systolic_array #(
 					.MATRIX_SIZE(MATRIX_SIZE),
 					.ACC_WIDTH (RESULT_WIDTH)
 				) u_pe (
-					.clk     (clk),
-					.rstn    (rstn),
-					.i_enable(pe_en_in[r][c]),
-					.i_w_load(pe_w_load[r]),
-					.i_a     (pe_a_in[r][c]),
-					.i_b     (pe_w_in[r][c]),
-					.i_psum  (pe_psum_in[r][c]),
-					.o_a     (pe_a_out[r][c]),
-					.o_psum  (pe_psum_out[r][c]),
-					.o_enable(pe_en_out[r][c])
+					.clk      (clk),
+					.rstn     (rstn),
+					.i_enable (pe_en_in[r][c]),
+					.i_w_load (pe_w_load[r]),
+					.i_a      (pe_a_in[r][c]),
+					.i_b      (pe_w_in[r][c]),
+					.i_psum_s (pe_psum_s_in[r][c]),
+					.i_psum_c (pe_psum_c_in[r][c]),
+					.o_a      (pe_a_out[r][c]),
+					.o_psum_s (pe_psum_s_out[r][c]),
+					.o_psum_c (pe_psum_c_out[r][c]),
+					.o_enable (pe_en_out[r][c])
 				);
 
 				if (c == 0) begin : gen_ctrl_head
-					assign pe_en_in[r][0]  = array_active;
+					assign pe_en_in[r][0] = pe_en_col0;
 				end else begin : gen_ctrl_flow
 					assign pe_en_in[r][c]  = pe_en_out[r][c-1];
 				end
@@ -161,9 +170,11 @@ module systolic_array #(
 				end
 
 				if (r == 0) begin : gen_psum_head
-					assign pe_psum_in[r][c] = '0;
+					assign pe_psum_s_in[r][c] = '0;
+					assign pe_psum_c_in[r][c] = '0;
 				end else begin : gen_psum_flow
-					assign pe_psum_in[r][c] = pe_psum_out[r-1][c];
+					assign pe_psum_s_in[r][c] = pe_psum_s_out[r-1][c];
+					assign pe_psum_c_in[r][c] = pe_psum_c_out[r-1][c];
 				end
 			end
 		end
@@ -176,11 +187,41 @@ module systolic_array #(
 		end
 	endgenerate
 
+	localparam integer RESOLVE_LOW_W = RESULT_WIDTH / 2;
+	localparam integer RESOLVE_HIGH_W = RESULT_WIDTH - RESOLVE_LOW_W;
+
+	logic [RESOLVE_LOW_W-1:0] resolve_low_sum_r [0:ARRAY_COLS-1];
+	logic resolve_carry_r [0:ARRAY_COLS-1];
+	logic [RESOLVE_HIGH_W-1:0] resolve_high_s_r [0:ARRAY_COLS-1];
+	logic [RESOLVE_HIGH_W-1:0] resolve_high_c_r [0:ARRAY_COLS-1];
+	logic signed [RESULT_WIDTH-1:0] resolved_r [0:ARRAY_COLS-1];
+	
+	generate
+		for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_resolve
+			wire [RESOLVE_LOW_W-1:0] psum_s_low = pe_psum_s_out[ARRAY_ROWS-1][c][RESOLVE_LOW_W-1:0];
+			wire [RESOLVE_LOW_W-1:0] psum_c_low = pe_psum_c_out[ARRAY_ROWS-1][c][RESOLVE_LOW_W-1:0];
+			wire [RESULT_WIDTH-RESOLVE_LOW_W-1:0] psum_s_high = pe_psum_s_out[ARRAY_ROWS-1][c][RESULT_WIDTH-1:RESOLVE_LOW_W];
+			wire [RESULT_WIDTH-RESOLVE_LOW_W-1:0] psum_c_high = pe_psum_c_out[ARRAY_ROWS-1][c][RESULT_WIDTH-1:RESOLVE_LOW_W];
+			wire [RESOLVE_LOW_W:0] low_add = {1'b0, psum_s_low} + {1'b0, psum_c_low};
+			
+			always_ff @(posedge clk) begin
+				resolve_low_sum_r[c] <= low_add[RESOLVE_LOW_W-1:0];
+				resolve_carry_r[c] <= low_add[RESOLVE_LOW_W];
+				resolve_high_s_r[c] <= psum_s_high;
+				resolve_high_c_r[c] <= psum_c_high;
+			end
+
+			always_ff @(posedge clk) begin
+				resolved_r[c] <= {resolve_high_s_r[c] + resolve_high_c_r[c] + RESOLVE_HIGH_W'(resolve_carry_r[c]), resolve_low_sum_r[c]};
+			end
+		end
+	endgenerate
+
 	// feed col c
 	generate
 		for (c = 0; c < ARRAY_COLS; c = c + 1) begin : gen_drain
 			assign o_result_valid[c] = vld_r[DRAIN_LAT + c];
-			assign o_result_data[RESULT_WIDTH*c +: RESULT_WIDTH] = unsigned'(pe_psum_out[ARRAY_ROWS-1][c]);
+			assign o_result_data[RESULT_WIDTH*c +: RESULT_WIDTH] = unsigned'(resolved_r[c]);
 		end
 	endgenerate
 
