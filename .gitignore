@@ -27,6 +27,8 @@ __pycache__/
 .cursor/
 
 # local / generated
-verilog_sv2v/
+verilog_sv2v/*
 notes/
 runs/
+
+scripts/pinreport.py
