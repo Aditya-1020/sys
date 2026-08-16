@@ -41,7 +41,7 @@ GL_SNAP = $(TB_TOP)_gl_snap
 GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
 
 .PHONY: all venv cocotb xrun gl gl-waves vectors waves xrun-waves \
-	sv2v_rtl lint liblane lib-last_run report sta-shell clean
+	sv2v_rtl lint liblane lib-last_run report pinreport sta-gui sta-shell sta-corners clean
 
 all: cocotb
 
@@ -88,8 +88,20 @@ venv:
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(addprefix -v ,$(V_MODELS))
 
+# Interactive timing on a finished run, every corner loaded at once.
+#   RUN=<tag>       pick a run (default: newest run with an STA step)
+#   CORNER=<name>   corner that corner-less commands default to
+#   CORNERS=<glob>  load only matching corners, e.g. CORNERS='nom_*'
+STADEBUG_ARGS = $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(CORNERS),-k '$(CORNERS)',)
+
+sta-gui:
+	scripts/stadebug $(STADEBUG_ARGS) --gui
+
 sta-shell:
-	scripts/stadebug $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(GUI),--gui,)
+	scripts/stadebug $(STADEBUG_ARGS)
+
+sta-corners:
+	scripts/stadebug $(RUN) -l
 
 RUN ?=
 LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
@@ -107,6 +119,9 @@ lib-last_run:
 
 report:
 	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)
+
+# pinreport:
+# 	openroad -exit -no_splash -python scripts/pinreport.py $(RUN) $(PINREPORT_ARGS)
 
 $(BUILD_DIR)/%.patched.v: $(GL_PDK_VERILOG)/%.v Makefile | $(BUILD_DIR)
 	sed -E -e 's:^([ \t]*`(endif|else))[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$$:\1 // \3:' \
