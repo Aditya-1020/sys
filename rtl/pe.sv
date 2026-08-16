@@ -7,8 +7,8 @@ module pe #(
 	parameter integer ACC_WIDTH = 2*DATA_WIDTH + $clog2(MATRIX_SIZE)
 )(
 	input wire clk,
-	input wire rstn,
-	input wire i_enable, // compute
+	input wire rstn, // sync reset (datapath)
+	input wire i_enable,
 	input wire i_w_load,
 	input wire signed [DATA_WIDTH-1:0] i_a,
 	input wire signed [DATA_WIDTH-1:0] i_b,
@@ -19,59 +19,20 @@ module pe #(
 	output wire signed [ACC_WIDTH-1:0] o_psum_c,
 	output wire o_enable
 );
-	logic signed [DATA_WIDTH-1:0] a_r; // pass through only
-	always_ff @(posedge clk) begin
-		if (i_enable) begin
-			a_r <= i_a;
-		end
-	end
-
-	logic en_r;
-	always_ff @(posedge clk or negedge rstn) begin
-		if (!rstn) begin
-			en_r <= 1'b0;
-		end else begin
-			en_r <= i_enable;
-		end
-	end
-
-	// weight stationary; clear unless reloaded
-	logic signed [DATA_WIDTH-1:0] w_r;
-	always_ff @(posedge clk) begin
-		if (i_w_load) begin
-			w_r <= i_b;
-		end else begin
-			w_r <= w_r;
-		end
-	end
-
-	// pipelined multiply
 	localparam integer HALF_W = DATA_WIDTH / 2;
 	localparam integer PROD_W = 2 * DATA_WIDTH;
 
+	logic en_r;
+	logic signed [DATA_WIDTH-1:0] a_r, w_r;
 	logic signed [DATA_WIDTH+HALF_W:0] pp_lo_r;
 	logic signed [DATA_WIDTH+HALF_W-1:0] pp_hi_r;
 	logic signed [PROD_W-1:0] mult_pipe;
-
-	always_ff @(posedge clk) begin
-		pp_lo_r <= a_r * signed'({1'b0, w_r[HALF_W-1:0]});
-		pp_hi_r <= a_r * signed'(w_r[DATA_WIDTH-1:HALF_W]);
-	end
-
-	always_ff @(posedge clk) begin
-		mult_pipe <= (PROD_W'(pp_hi_r) <<< HALF_W) + PROD_W'(pp_lo_r);
-	end
-
-	
-	// carry same acucmulator
 	logic signed [ACC_WIDTH-1:0] acc_s, acc_c;
+
+	logic [ACC_WIDTH-1:0] csa_sum, csa_carry;
 	wire signed [ACC_WIDTH-1:0] mult_ext = ACC_WIDTH'(mult_pipe);
 
-	logic [ACC_WIDTH-1:0] csa_sum;
-	logic [ACC_WIDTH-1:0] csa_carry;
-	csa #(
-		.WIDTH(ACC_WIDTH)
-	 ) csa (
+	csa #(.WIDTH(ACC_WIDTH)) u_csa (
 		.i_a    (i_psum_s),
 		.i_b    (i_psum_c),
 		.i_c    (mult_ext),
@@ -79,13 +40,30 @@ module pe #(
 		.o_carry(csa_carry)
 	);
 
+	// One sync-reset policy for control; datapath regs hold when disabled (no X on release).
 	always_ff @(posedge clk) begin
-		if (i_enable) begin
-			acc_s <= signed'(csa_sum);
-			acc_c <= signed'(csa_carry);
+		if (!rstn) begin
+			en_r <= 1'b0;
+			a_r  <= '0;
+			w_r  <= '0;
+			pp_lo_r   <= '0;
+			pp_hi_r   <= '0;
+			mult_pipe <= '0;
+			acc_s <= '0;
+			acc_c <= '0;
 		end else begin
-			acc_s <= acc_s;
-			acc_c <= acc_c;
+			en_r <= i_enable;
+			if (i_enable)
+				a_r <= i_a;
+			if (i_w_load)
+				w_r <= i_b;
+			pp_lo_r <= a_r * signed'({1'b0, w_r[HALF_W-1:0]});
+			pp_hi_r <= a_r * signed'(w_r[DATA_WIDTH-1:HALF_W]);
+			mult_pipe <= (PROD_W'(pp_hi_r) <<< HALF_W) + PROD_W'(pp_lo_r);
+			if (i_enable) begin
+				acc_s <= signed'(csa_sum);
+				acc_c <= signed'(csa_carry);
+			end
 		end
 	end
 

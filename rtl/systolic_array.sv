@@ -32,7 +32,7 @@ module systolic_array #(
 	logic [LANE_W-1:0] b_lane_r;
 	logic [ROW_W-1:0] b_wdata_r, load_a;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			b_en_r <= 1'b0;
 		end else begin
@@ -40,7 +40,7 @@ module systolic_array #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			b_lane_r  <= '0;
 			b_wdata_r <= '0;
@@ -54,7 +54,7 @@ module systolic_array #(
 
 	// valid delay line
 	logic [PIPE_DEPTH:0] vld_r;
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			vld_r <= '0;
 		end else begin
@@ -69,7 +69,7 @@ module systolic_array #(
 	logic [LANE_W-1:0] row_cnt_r;
 	wire a_last = i_a_valid && (row_cnt_r == LANE_W'(MATRIX_SIZE-1));
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			row_cnt_r <= '0;
 		end else if (i_a_valid) begin
@@ -78,7 +78,7 @@ module systolic_array #(
 	end
 
 	logic [PIPE_DEPTH:0] eot_r;
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			eot_r <= '0;
 		end else begin
@@ -96,7 +96,7 @@ module systolic_array #(
 	generate
 		for (d = 1; d < ARRAY_ROWS; d = d + 1) begin : gen_a_skew
 			logic [ROW_W-1:0] stage_r;
-			always_ff @(posedge clk or negedge rstn) begin
+			always_ff @(posedge clk) begin
 				if (!rstn) begin
 					stage_r <= '0;
 				end else begin
