@@ -43,7 +43,7 @@ module res_cap_fifo #(
 			wire signed [RESULT_WIDTH-1:0] din = signed'(i_result_data[RESULT_WIDTH*c +: RESULT_WIDTH]);
 			wire wr_en = i_result_valid[c] && !full;
 
-			always_ff @(posedge clk or negedge rstn) begin
+			always_ff @(posedge clk) begin
 				if (!rstn) begin
 					wr_ptr[c] <= '0;
 				end else if (wr_en) begin
@@ -132,7 +132,7 @@ module res_cap_fifo #(
 	wire slot_free = !r0_v || !r1_v || row_retire;
 	wire load_en = can_load && slot_free;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			r0_v <= 1'b0;
 			r1_v <= 1'b0;
@@ -164,7 +164,7 @@ module res_cap_fifo #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			rd_sel_r <= {{(ROWS-1){1'b0}}, 1'b1};
 		end else if (load_en) begin
@@ -172,7 +172,7 @@ module res_cap_fifo #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			beat_idx <= '0;
 		end else if (transfer) begin
@@ -180,7 +180,7 @@ module res_cap_fifo #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			head_valid_r <= 1'b0;
 		end else if (transfer) begin
@@ -196,7 +196,7 @@ module res_cap_fifo #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			level_r <= '0;
 		end else if (push && !row_retire) begin
@@ -207,7 +207,7 @@ module res_cap_fifo #(
 	end
 
 	logic overflow_r;
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			overflow_r <= 1'b0;
 		end else if (row_valid && full) begin
@@ -218,7 +218,7 @@ module res_cap_fifo #(
 	localparam integer CMT_W = $clog2(ROWS + MATRIX_SIZE + 1);
 	logic [CMT_W-1:0] committed_r;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			committed_r <= '0;
 		end else begin
