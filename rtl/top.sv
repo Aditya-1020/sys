@@ -2,13 +2,12 @@
 `timescale 1ps/1ps
 
 module top #(
-	parameter integer AXI_ADDR_W = 32,
-	parameter integer AXI_DATA_W = 32
+	parameter integer AXI_ADDR_W = sys_pkg::AXI_ADDR_W,
+	parameter integer AXI_DATA_W = sys_pkg::AXI_DATA_W
 )(
 	input wire clk,
 	input wire rstn,
 
-	// axilite slave (csr cpu)
 	input wire [7:0] i_s_axil_awaddr,
 	input wire i_s_axil_awvalid,
 	output wire o_s_axil_awready,
@@ -27,391 +26,276 @@ module top #(
 	output wire o_s_axil_rvalid,
 	input wire i_s_axil_rready,
 
-	// axi master read
 	output wire [AXI_ADDR_W-1:0] o_m_axi_araddr,
 	output wire [7:0] o_m_axi_arlen,
 	output wire o_m_axi_arvalid,
 	input wire i_m_axi_arready,
-
 	input wire [AXI_DATA_W-1:0] i_m_axi_rdata,
 	input wire [1:0] i_m_axi_rresp,
 	input wire i_m_axi_rlast,
 	input wire i_m_axi_rvalid,
 	output wire o_m_axi_rready,
 
-	// axi master write (result store)
 	output wire [AXI_ADDR_W-1:0] o_m_axi_awaddr,
 	output wire o_m_axi_awvalid,
 	input wire i_m_axi_awready,
-
 	output wire [AXI_DATA_W-1:0] o_m_axi_wdata,
 	output wire o_m_axi_wlast,
 	output wire o_m_axi_wvalid,
 	input wire i_m_axi_wready,
-
 	input wire [1:0] i_m_axi_bresp,
 	input wire i_m_axi_bvalid,
 	output wire o_m_axi_bready
 );
+	import sys_pkg::*;
 
-	localparam integer RES_JOBS = 2;
-	
-	localparam integer MATRIX_SIZE = 4;
-	localparam integer DATA_WIDTH = 8;
-	localparam integer ROW_W = MATRIX_SIZE * DATA_WIDTH; // 32
-	localparam integer LANE_W = $clog2(MATRIX_SIZE); // 2
-	localparam integer RESULT_W = (2 * DATA_WIDTH) + $clog2(MATRIX_SIZE); // 18
-	localparam integer TILE_BITS = MATRIX_SIZE * MATRIX_SIZE * RESULT_W; // 288
-	localparam integer SRAM_ADDR_W = 6;
-	localparam integer LEN_W = SRAM_ADDR_W + 1;
+	localparam integer MATRIX_SIZE = sys_pkg::MATRIX_SIZE;
+	localparam integer DATA_WIDTH = sys_pkg::DATA_WIDTH;
+	localparam integer RESULT_W = sys_pkg::RESULT_W;
+	localparam integer LEVEL_W = sys_pkg::LEVEL_W;
+	localparam integer TILE_BEATS = sys_pkg::TILE_BEATS;
+	localparam integer TILE_BYTES = sys_pkg::TILE_BYTES;
+	localparam integer ST_TILE_LSB = sys_pkg::ST_TILE_LSB;
+	localparam integer CTRL_EN = sys_pkg::CTRL_EN;
+	localparam integer CTRL_GO = sys_pkg::CTRL_GO;
+	localparam integer CTRL_LOAD_W = sys_pkg::CTRL_LOAD_W;
+	localparam integer CTRL_STORE = sys_pkg::CTRL_STORE;
+	localparam integer CTRL_AUTO_ST = sys_pkg::CTRL_AUTO_ST;
+	localparam integer CTRL_AUTO_FILL = sys_pkg::CTRL_AUTO_FILL;
+	localparam integer ST_DMA_BUSY = sys_pkg::ST_DMA_BUSY;
+	localparam integer ST_DMA_DONE = sys_pkg::ST_DMA_DONE;
+	localparam integer ST_DMA_ERR = sys_pkg::ST_DMA_ERR;
+	localparam integer ST_FILL_DONE = sys_pkg::ST_FILL_DONE;
+	localparam integer ST_CTRL_BUSY = sys_pkg::ST_CTRL_BUSY;
+	localparam integer ST_ARRAY_BUSY = sys_pkg::ST_ARRAY_BUSY;
+	localparam integer ST_ARRAY_DONE = sys_pkg::ST_ARRAY_DONE;
+	localparam integer ST_PP_SEL = sys_pkg::ST_PP_SEL;
+	localparam integer ST_W_VALID = sys_pkg::ST_W_VALID;
+	localparam integer ST_RES_VALID = sys_pkg::ST_RES_VALID;
+	localparam integer ST_RES_OVF = sys_pkg::ST_RES_OVF;
+	localparam integer ST_WDMA_BUSY = sys_pkg::ST_WDMA_BUSY;
+	localparam integer ST_WDMA_DONE = sys_pkg::ST_WDMA_DONE;
+	localparam integer ST_WDMA_ERR = sys_pkg::ST_WDMA_ERR;
+	localparam integer ST_AF_BUSY = sys_pkg::ST_AF_BUSY;
+	localparam integer ST_LEVEL_LSB = sys_pkg::ST_LEVEL_LSB;
 
-	// CTRL bit map (0x00)
-	localparam integer CTRL_EN = 0; // array enable
-	localparam integer CTRL_GO = 1; // rising edge launches one dma job
-	localparam integer CTRL_LOAD_W = 2; // reload stationary weights this job
-	localparam integer CTRL_STORE = 3; // rising edge stores one c tile to dst
-	localparam integer CTRL_AUTO_ST = 4; // self launch store per completed tile
-	localparam integer CTRL_AUTO_FILL = 5; // self launch fill per freed buffer
-
-	// STATUS bit map (0x04)
-	localparam integer ST_DMA_BUSY = 0;
-	localparam integer ST_DMA_DONE = 1;
-	localparam integer ST_DMA_ERR = 2; // len mismatch or rresp err
-	localparam integer ST_FILL_DONE = 3; // half filled, waiting on swap
-	localparam integer ST_CTRL_BUSY = 4;
-	localparam integer ST_ARRAY_BUSY = 5;
-	localparam integer ST_ARRAY_DONE = 6;
-	localparam integer ST_PP_SEL = 7; // which half the dma owns
-	localparam integer ST_W_VALID = 8; // weights resident
-	localparam integer ST_RES_VALID = 9; // at least one result poppable
-	localparam integer ST_RES_OVF = 10;
-	localparam integer ST_WDMA_BUSY = 11;
-	localparam integer ST_WDMA_DONE = 12;
-	localparam integer ST_WDMA_ERR = 13; // bresp err
-	localparam integer ST_AF_BUSY = 14; // auto fill busy
-
-	localparam integer LEVEL_W = $clog2((RES_JOBS * MATRIX_SIZE) + 1);
-	localparam integer ST_LEVEL_LSB = 16;
-	localparam integer ST_TILE_LSB = ST_LEVEL_LSB + LEVEL_W; // 21
-
-	wire resetn_synced;
-	reset_sync_2ff u_rsync (
-		.i_clk(clk),
-		.rstn_src(rstn),
-		.rstn_sync(resetn_synced)
+	wire [3:0] rstn_io;
+	wire [3:0] rstn_dp;
+	reset_gen u_reset_gen (
+		.clk(clk),
+		.rstn_async(rstn),
+		.rstn_io(rstn_io),
+		.rstn_dp(rstn_dp)
 	);
 
-	/* verilator lint_off UNUSEDSIGNAL */
-	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr, csr_njobs;
-	/* verilator lint_on UNUSEDSIGNAL */
-	logic [31:0] csr_status;
-
-	logic go_r, store_r, auto_st_r, auto_fill_r;
-	always_ff @(posedge clk or negedge resetn_synced) begin
-		if (!resetn_synced) begin
-			go_r <= 1'b0;
-			store_r <= 1'b0;
-			auto_st_r <= 1'b0;
-			auto_fill_r <= 1'b0;
-		end else begin
-			go_r <= csr_ctrl[CTRL_GO];
-			store_r <= csr_ctrl[CTRL_STORE];
-			auto_st_r <= csr_ctrl[CTRL_AUTO_ST];
-			auto_fill_r <= csr_ctrl[CTRL_AUTO_FILL];
-		end
-	end
-	wire dma_start_manual = csr_ctrl[CTRL_GO] && !go_r;
-	wire wdma_start_manual = csr_ctrl[CTRL_STORE] && !store_r;
-	wire auto_st_en = csr_ctrl[CTRL_AUTO_ST];
-	wire auto_st_arm = auto_st_en && !auto_st_r; // rising edge reloads
-	wire auto_fill_en = csr_ctrl[CTRL_AUTO_FILL];
-	wire auto_fill_arm = auto_fill_en && !auto_fill_r;
-
-	wire dma_busy, dma_done, dma_err;
-	wire dma_fill_done, dma_swap;
-	wire array_release;
-
+	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr, csr_njobs, csr_status;
+	wire dma_busy, dma_done, dma_err, dma_fill_done, dma_swap, array_release;
 	wire dma_cs, dma_we;
 	wire [3:0] dma_mask;
 	wire [SRAM_ADDR_W-1:0] dma_addr;
 	wire [ROW_W-1:0] dma_wdata;
-
-	wire arr_ctrl_cs_p1; // sram port 1
+	wire arr_ctrl_cs_p1;
 	wire [SRAM_ADDR_W-1:0] arr_ctrl_addr;
 	wire [ROW_W-1:0] sram_rdata;
-
 	wire arr_ctrl_b_en, arr_ctrl_a_valid;
 	wire [LANE_W-1:0] arr_ctrl_b_lane;
 	wire [ROW_W-1:0] arr_ctrl_b_wdata, arr_ctrl_ld_a;
-
 	wire arr_ctrl_busy, arr_ctrl_w_valid, ping_pong_sel, arr_reserve;
 	wire array_done, array_busy;
-
-	// result capture path
 	wire [MATRIX_SIZE*RESULT_W-1:0] arr_result_data;
 	wire [MATRIX_SIZE-1:0] arr_result_valid;
 	wire fifo_room, fifo_valid, fifo_overflow, fifo_rd;
-	wire [AXI_DATA_W-1:0] fifo_rdata; // tight-packed RESULT_W results
+	wire [AXI_DATA_W-1:0] fifo_rdata;
 	wire [LEVEL_W-1:0] fifo_level;
-
-	wire [31:0] csr_result = fifo_rdata; // same packed word the store dma writes
-
-	// result store dma
 	wire wdma_busy, wdma_done, wdma_err, wdma_resp, wdma_last_beat, wdma_fifo_rd, csr_result_rd;
+	wire dma_start, wdma_start;
+	wire [31:0] dma_src, wdma_dst;
+	wire [31:0] csr_result = fifo_rdata;
+
 	assign fifo_rd = wdma_busy ? wdma_fifo_rd : csr_result_rd;
 
-	// result store
-	localparam integer TILE_BEATS = TILE_BITS / AXI_DATA_W; // 9
-	localparam integer TILE_BYTES = TILE_BEATS * 4; // 36
-
-	wire tile_ready = (fifo_level >= LEVEL_W'(MATRIX_SIZE)); // a whole tile resident
-	wire wdma_start = wdma_start_manual || (auto_st_en && tile_ready && (!wdma_busy || wdma_last_beat));
-	wire aw_fire = o_m_axi_awvalid && i_m_axi_awready;
-
-	logic [31:0] dst_ptr_r;
-	wire [31:0] wdma_dst = dst_ptr_r;
-	always_ff @(posedge clk or negedge resetn_synced) begin
-		if (!resetn_synced) begin
-			dst_ptr_r <= '0;
-		end else if (auto_st_arm || wdma_start_manual) begin
-			dst_ptr_r <= csr_dst_addr;
-		end else if (aw_fire && auto_st_en) begin
-			dst_ptr_r <= dst_ptr_r + 32'(TILE_BYTES);
-		end
-	end
-
-	logic [3:0] tile_cnt_r;
-	always_ff @(posedge clk or negedge resetn_synced) begin
-		if (!resetn_synced) begin
-			tile_cnt_r <= '0;
-		end else if (auto_st_arm) begin
-			tile_cnt_r <= '0;
-		end else if (wdma_resp) begin
-			tile_cnt_r <= tile_cnt_r + 1'b1;
-		end
-	end
-	
-	localparam integer NJOB_W = 16;
-
-	logic [31:0] src_ptr_r;
-	logic [NJOB_W-1:0] fill_left_r;
-
-	wire auto_fill_pend = auto_fill_en && (fill_left_r != '0);
-	wire auto_fill_go = auto_fill_pend && !dma_busy; // one cycle: dma leaves IDLE next clk
-	wire dma_start = dma_start_manual || auto_fill_go;
-	wire [31:0] dma_src = src_ptr_r;
-	wire [31:0] fill_stride = {23'b0, csr_len[LEN_W-1:0], 2'b00}; // words -> bytes
-
-	wire ar_fire = o_m_axi_arvalid && i_m_axi_arready;
-
-	always_ff @(posedge clk or negedge resetn_synced) begin
-		if (!resetn_synced) begin
-			src_ptr_r <= '0;
-			fill_left_r <= '0;
-		end else begin
-			if (auto_fill_arm) begin // rising edge reloads ptr + count
-				src_ptr_r <= csr_src_addr;
-			end else if (dma_start_manual) begin
-				src_ptr_r <= csr_src_addr;
-			end else if (ar_fire && auto_fill_en) begin
-				src_ptr_r <= src_ptr_r + fill_stride;
-			end
-
-			if (auto_fill_arm) begin
-				fill_left_r <= csr_njobs[NJOB_W-1:0];
-			end else if (auto_fill_go) begin
-				fill_left_r <= fill_left_r - 1'b1;
-			end
-		end
-	end
-
-	always_comb begin
-		csr_status = '0;
-		csr_status[ST_DMA_BUSY] = dma_busy;
-		csr_status[ST_DMA_DONE] = dma_done;
-		csr_status[ST_DMA_ERR] = dma_err;
-		csr_status[ST_FILL_DONE] = dma_fill_done;
-		csr_status[ST_CTRL_BUSY] = arr_ctrl_busy;
-		csr_status[ST_ARRAY_BUSY] = array_busy;
-		csr_status[ST_ARRAY_DONE] = array_done;
-		csr_status[ST_PP_SEL] = ping_pong_sel;
-		csr_status[ST_W_VALID] = arr_ctrl_w_valid;
-		csr_status[ST_RES_VALID] = fifo_valid;
-		csr_status[ST_RES_OVF] = fifo_overflow;
-		csr_status[ST_WDMA_BUSY] = wdma_busy;
-		csr_status[ST_WDMA_DONE] = wdma_done;
-		csr_status[ST_WDMA_ERR] = wdma_err;
-		csr_status[ST_AF_BUSY] = auto_fill_pend;
-		csr_status[ST_LEVEL_LSB +: LEVEL_W] = fifo_level;
-		csr_status[ST_TILE_LSB +: 4] = tile_cnt_r;
-	end
+	sys_ctrl u_sys_ctrl (
+		.clk(clk),
+		.rstn(rstn_io[3]),
+		.csr_ctrl(csr_ctrl),
+		.csr_src_addr(csr_src_addr),
+		.csr_len(csr_len),
+		.csr_dst_addr(csr_dst_addr),
+		.csr_njobs(csr_njobs),
+		.dma_busy(dma_busy),
+		.dma_done(dma_done),
+		.dma_err(dma_err),
+		.dma_fill_done(dma_fill_done),
+		.wdma_busy(wdma_busy),
+		.wdma_done(wdma_done),
+		.wdma_err(wdma_err),
+		.wdma_resp(wdma_resp),
+		.wdma_last_beat(wdma_last_beat),
+		.arr_ctrl_busy(arr_ctrl_busy),
+		.arr_ctrl_w_valid(arr_ctrl_w_valid),
+		.array_busy(array_busy),
+		.array_done(array_done),
+		.ping_pong_sel(ping_pong_sel),
+		.fifo_valid(fifo_valid),
+		.fifo_overflow(fifo_overflow),
+		.fifo_level(fifo_level),
+		.ar_fire(o_m_axi_arvalid & i_m_axi_arready),
+		.aw_fire(o_m_axi_awvalid & i_m_axi_awready),
+		.o_dma_start(dma_start),
+		.o_dma_src(dma_src),
+		.o_wdma_start(wdma_start),
+		.o_wdma_dst(wdma_dst),
+		.o_csr_status(csr_status)
+	);
 
 	axi_lite_csr u_csr (
-		.aclk            (clk),
-		.aresetn         (resetn_synced),
-		.i_s_axil_awaddr (i_s_axil_awaddr),
+		.aclk(clk),
+		.aresetn(rstn_io[0]),
+		.i_s_axil_awaddr(i_s_axil_awaddr),
 		.i_s_axil_awvalid(i_s_axil_awvalid),
 		.o_s_axil_awready(o_s_axil_awready),
-		.i_s_axil_wdata  (i_s_axil_wdata),
-		.i_s_axil_wstrb  (i_s_axil_wstrb),
-		.i_s_axil_wvalid (i_s_axil_wvalid),
-		.o_s_axil_wready (o_s_axil_wready),
-		.o_s_axil_bresp  (o_s_axil_bresp),
-		.o_s_axil_bvalid (o_s_axil_bvalid),
-		.i_s_axil_bready (i_s_axil_bready),
-		.i_s_axil_araddr (i_s_axil_araddr),
+		.i_s_axil_wdata(i_s_axil_wdata),
+		.i_s_axil_wstrb(i_s_axil_wstrb),
+		.i_s_axil_wvalid(i_s_axil_wvalid),
+		.o_s_axil_wready(o_s_axil_wready),
+		.o_s_axil_bresp(o_s_axil_bresp),
+		.o_s_axil_bvalid(o_s_axil_bvalid),
+		.i_s_axil_bready(i_s_axil_bready),
+		.i_s_axil_araddr(i_s_axil_araddr),
 		.i_s_axil_arvalid(i_s_axil_arvalid),
 		.o_s_axil_arready(o_s_axil_arready),
-		.o_s_axil_rdata  (o_s_axil_rdata),
-		.o_s_axil_rresp  (o_s_axil_rresp),
-		.o_s_axil_rvalid (o_s_axil_rvalid),
-		.i_s_axil_rready (i_s_axil_rready),
-		.i_fifo_valid    (fifo_valid),
-		.csr_status      (csr_status),
-		.csr_result      (csr_result),
-		.csr_result_rd   (csr_result_rd),
-		.csr_ctrl        (csr_ctrl),
-		.csr_src_addr    (csr_src_addr),
-		.csr_len         (csr_len),
-		.csr_dst_addr    (csr_dst_addr),
-		.csr_njobs       (csr_njobs)
+		.o_s_axil_rdata(o_s_axil_rdata),
+		.o_s_axil_rresp(o_s_axil_rresp),
+		.o_s_axil_rvalid(o_s_axil_rvalid),
+		.i_s_axil_rready(i_s_axil_rready),
+		.i_fifo_valid(fifo_valid),
+		.csr_status(csr_status),
+		.csr_result(csr_result),
+		.csr_result_rd(csr_result_rd),
+		.csr_ctrl(csr_ctrl),
+		.csr_src_addr(csr_src_addr),
+		.csr_len(csr_len),
+		.csr_dst_addr(csr_dst_addr),
+		.csr_njobs(csr_njobs)
 	);
 
-	axi4_dma_wr #(
-		.AXI_ADDR_W (AXI_ADDR_W),
-		.BEATS      (TILE_BEATS)
-	) u_wdma (
-		.clk          (clk),
-		.rstn         (resetn_synced),
-		.i_dst_addr   (wdma_dst),
-		.i_start      (wdma_start),
-		.o_busy       (wdma_busy),
-		.o_resp       (wdma_resp),
-		.o_last_beat  (wdma_last_beat),
-		.o_done       (wdma_done),
-		.o_err        (wdma_err),
-		.o_m_awaddr   (o_m_axi_awaddr),
-		.o_m_awvalid  (o_m_axi_awvalid),
-		.i_m_awready  (i_m_axi_awready),
-		.o_m_wdata    (o_m_axi_wdata),
-		.o_m_wlast    (o_m_axi_wlast),
-		.o_m_wvalid   (o_m_axi_wvalid),
-		.i_m_wready   (i_m_axi_wready),
-		.i_m_bresp    (i_m_axi_bresp),
-		.i_m_bvalid   (i_m_axi_bvalid),
-		.o_m_bready   (o_m_axi_bready),
-		.i_fifo_valid (fifo_valid),
-		.i_fifo_rdata (csr_result),
-		.o_fifo_rd    (wdma_fifo_rd)
+	axi4_dma_wr #(.AXI_ADDR_W(AXI_ADDR_W), .BEATS(TILE_BEATS)) u_wdma (
+		.clk(clk),
+		.rstn(rstn_io[2]),
+		.i_dst_addr(wdma_dst),
+		.i_start(wdma_start),
+		.o_busy(wdma_busy),
+		.o_resp(wdma_resp),
+		.o_last_beat(wdma_last_beat),
+		.o_done(wdma_done),
+		.o_err(wdma_err),
+		.o_m_awaddr(o_m_axi_awaddr),
+		.o_m_awvalid(o_m_axi_awvalid),
+		.i_m_awready(i_m_axi_awready),
+		.o_m_wdata(o_m_axi_wdata),
+		.o_m_wlast(o_m_axi_wlast),
+		.o_m_wvalid(o_m_axi_wvalid),
+		.i_m_wready(i_m_axi_wready),
+		.i_m_bresp(i_m_axi_bresp),
+		.i_m_bvalid(i_m_axi_bvalid),
+		.o_m_bready(o_m_axi_bready),
+		.i_fifo_valid(fifo_valid),
+		.i_fifo_rdata(csr_result),
+		.o_fifo_rd(wdma_fifo_rd)
 	);
 
-	axi4_dma #(
-		.AXI_ADDR_W  (AXI_ADDR_W),
-		.SRAM_ADDR_W (SRAM_ADDR_W)
-	 ) u_dma (
-		.clk         (clk),
-		.rstn        (resetn_synced),
-		.i_src_addr  (dma_src),
-		.i_len       (csr_len[LEN_W-1:0]), // 1-128 safe accesss (>128 wraps wrptr)
-		.i_start     (dma_start),
-		.o_busy      (dma_busy),
-		.o_done      (dma_done),
-		.o_err       (dma_err),
-		.o_m_araddr  (o_m_axi_araddr),
-		.o_m_arlen   (o_m_axi_arlen),
-		.o_m_arvalid (o_m_axi_arvalid),
-		.i_m_arready (i_m_axi_arready),
-		.i_m_rdata   (i_m_axi_rdata),
-		.i_m_rresp   (i_m_axi_rresp),
-		.i_m_rlast   (i_m_axi_rlast),
-		.i_m_rvalid  (i_m_axi_rvalid),
-		.o_m_rready  (o_m_axi_rready),
-		.o_dma_cs    (dma_cs),
-		.o_dma_we    (dma_we),
-		.o_dma_mask  (dma_mask),
-		.o_dma_addr  (dma_addr),
-		.o_dma_wdata (dma_wdata),
-		.o_swap      (dma_swap), // ownership
-		.o_fill_done (dma_fill_done),
+	axi4_dma #(.AXI_ADDR_W(AXI_ADDR_W), .SRAM_ADDR_W(SRAM_ADDR_W)) u_dma (
+		.clk(clk),
+		.rstn(rstn_io[1]),
+		.i_src_addr(dma_src),
+		.i_len(csr_len[LEN_W-1:0]),
+		.i_start(dma_start),
+		.o_busy(dma_busy),
+		.o_done(dma_done),
+		.o_err(dma_err),
+		.o_m_araddr(o_m_axi_araddr),
+		.o_m_arlen(o_m_axi_arlen),
+		.o_m_arvalid(o_m_axi_arvalid),
+		.i_m_arready(i_m_axi_arready),
+		.i_m_rdata(i_m_axi_rdata),
+		.i_m_rresp(i_m_axi_rresp),
+		.i_m_rlast(i_m_axi_rlast),
+		.i_m_rvalid(i_m_axi_rvalid),
+		.o_m_rready(o_m_axi_rready),
+		.o_dma_cs(dma_cs),
+		.o_dma_we(dma_we),
+		.o_dma_mask(dma_mask),
+		.o_dma_addr(dma_addr),
+		.o_dma_wdata(dma_wdata),
+		.o_swap(dma_swap),
+		.o_fill_done(dma_fill_done),
 		.i_array_done(array_release)
 	);
 
 	pp_buf_sram u_sram (
-		.clk            (clk),
-		.rstn           (resetn_synced),
-		.i_swap         (dma_swap),
+		.clk(clk),
+		.rstn(rstn_dp[0]),
+		.i_swap(dma_swap),
 		.o_ping_pong_sel(ping_pong_sel),
-		.i_dma_cs       (dma_cs),
-		.i_dma_we       (dma_we),
-		.i_dma_mask     (dma_mask),
-		.i_dma_addr     (dma_addr),
-		.i_dma_wdata    (dma_wdata),
-		.i_cs_array     (arr_ctrl_cs_p1),
-		.i_addr_array   (arr_ctrl_addr),
-		.o_array_rdata  (sram_rdata)
+		.i_dma_cs(dma_cs),
+		.i_dma_we(dma_we),
+		.i_dma_mask(dma_mask),
+		.i_dma_addr(dma_addr),
+		.i_dma_wdata(dma_wdata),
+		.i_cs_array(arr_ctrl_cs_p1),
+		.i_addr_array(arr_ctrl_addr),
+		.o_array_rdata(sram_rdata)
 	);
 
-	array_control #(
-		.MATRIX_SIZE (MATRIX_SIZE),
-		.DATA_WIDTH  (DATA_WIDTH),
-		.SRAM_ADDR_W (SRAM_ADDR_W)
-	) u_arr_ctrl (
-		.clk           (clk),
-		.rstn          (resetn_synced),
-		.i_enable      (csr_ctrl[CTRL_EN]),
-		.i_load_w      (csr_ctrl[CTRL_LOAD_W]),
-		.i_len         (csr_len[LEN_W-1:0]),
-		.i_room        (fifo_room), // no room for run stay idle
-		.i_fill_done   (dma_fill_done),
-		.o_array_done  (array_release),
-		.o_cs_array    (arr_ctrl_cs_p1),
-		.o_addr_array  (arr_ctrl_addr),
-		.i_array_rdata (sram_rdata),
-		.o_b_en        (arr_ctrl_b_en),
-		.o_b_lane      (arr_ctrl_b_lane),
-		.o_b_wdata     (arr_ctrl_b_wdata),
-		.o_a_valid     (arr_ctrl_a_valid),
-		.o_ld_a        (arr_ctrl_ld_a),
-		.i_array_busy  (array_busy),
-		.o_reserve     (arr_reserve),
-		.o_busy        (arr_ctrl_busy),
-		.o_w_valid     (arr_ctrl_w_valid)
+	array_control #(.MATRIX_SIZE(MATRIX_SIZE), .DATA_WIDTH(DATA_WIDTH), .SRAM_ADDR_W(SRAM_ADDR_W)) u_arr_ctrl (
+		.clk(clk),
+		.rstn(rstn_dp[1]),
+		.i_enable(csr_ctrl[CTRL_EN]),
+		.i_load_w(csr_ctrl[CTRL_LOAD_W]),
+		.i_len(csr_len[LEN_W-1:0]),
+		.i_room(fifo_room),
+		.i_fill_done(dma_fill_done),
+		.o_array_done(array_release),
+		.o_cs_array(arr_ctrl_cs_p1),
+		.o_addr_array(arr_ctrl_addr),
+		.i_array_rdata(sram_rdata),
+		.o_b_en(arr_ctrl_b_en),
+		.o_b_lane(arr_ctrl_b_lane),
+		.o_b_wdata(arr_ctrl_b_wdata),
+		.o_a_valid(arr_ctrl_a_valid),
+		.o_ld_a(arr_ctrl_ld_a),
+		.i_array_busy(array_busy),
+		.o_reserve(arr_reserve),
+		.o_busy(arr_ctrl_busy),
+		.o_w_valid(arr_ctrl_w_valid)
 	);
 
-	systolic_array #(
-		.MATRIX_SIZE (MATRIX_SIZE),
-		.DATA_WIDTH  (DATA_WIDTH)
-	) u_array (
-		.clk            (clk),
-		.rstn           (resetn_synced),
-		.i_a_valid      (arr_ctrl_a_valid),
-		.i_ld_a         (arr_ctrl_ld_a),
-		.i_b_en         (arr_ctrl_b_en),
-		.i_b_lane       (arr_ctrl_b_lane),
-		.i_b_wdata      (arr_ctrl_b_wdata),
-		.o_result_data  (arr_result_data),
-		.o_result_valid (arr_result_valid),
-		.o_done         (array_done),
-		.o_busy         (array_busy)
+	systolic_array #(.MATRIX_SIZE(MATRIX_SIZE), .DATA_WIDTH(DATA_WIDTH)) u_array (
+		.clk(clk),
+		.rstn(rstn_dp[2]),
+		.i_a_valid(arr_ctrl_a_valid),
+		.i_ld_a(arr_ctrl_ld_a),
+		.i_b_en(arr_ctrl_b_en),
+		.i_b_lane(arr_ctrl_b_lane),
+		.i_b_wdata(arr_ctrl_b_wdata),
+		.o_result_data(arr_result_data),
+		.o_result_valid(arr_result_valid),
+		.o_done(array_done),
+		.o_busy(array_busy)
 	);
 
-	res_cap_fifo #(
-		.MATRIX_SIZE (MATRIX_SIZE),
-		.DATA_WIDTH  (DATA_WIDTH),
-		.BEAT_W      (AXI_DATA_W),
-		.JOBS        (RES_JOBS)
-	) u_res_fifo (
-		.clk            (clk),
-		.rstn           (resetn_synced),
-		.i_result_valid (arr_result_valid),
-		.i_result_data  (arr_result_data),
-		.i_reserve      (arr_reserve),
-		.o_room         (fifo_room),
-		.rd_en          (fifo_rd),
-		.o_rdata        (fifo_rdata),
-		.o_valid        (fifo_valid),
-		.o_level        (fifo_level),
-		.o_overflow     (fifo_overflow)
+	res_cap_fifo #(.MATRIX_SIZE(MATRIX_SIZE), .DATA_WIDTH(DATA_WIDTH), .BEAT_W(AXI_DATA_W), .JOBS(RES_JOBS)) u_res_fifo (
+		.clk(clk),
+		.rstn(rstn_dp[3]),
+		.i_result_valid(arr_result_valid),
+		.i_result_data(arr_result_data),
+		.i_reserve(arr_reserve),
+		.o_room(fifo_room),
+		.rd_en(fifo_rd),
+		.o_rdata(fifo_rdata),
+		.o_valid(fifo_valid),
+		.o_level(fifo_level),
+		.o_overflow(fifo_overflow)
 	);
 
 endmodule
