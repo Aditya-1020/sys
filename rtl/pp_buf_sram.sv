@@ -23,7 +23,7 @@ module pp_buf_sram (
 	(* keep *) logic m1_rel_a, m1_rel_b;
 	(* keep *) wire m0_rstb, m0_access_en, m1_rstb, m1_access_en;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			m0_rel_r <= 2'b00;
 		end else begin
@@ -34,7 +34,7 @@ module pp_buf_sram (
 	assign m0_rstb = m0_rel_r[0];
 	assign m0_access_en = m0_rel_r[1];
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			m1_rel_a <= 1'b0;
 			m1_rel_b <= 1'b0;
@@ -62,7 +62,7 @@ module pp_buf_sram (
 	wire m0_wdata_en = i_dma_cs && i_dma_we && m0_dma_sel;
 	wire m1_wdata_en = i_dma_cs && i_dma_we && m1_dma_sel;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 	    if (!rstn) begin
 	        dma_cs_r <= 1'b0;
 	        dma_we_r <= 1'b0;
@@ -72,7 +72,7 @@ module pp_buf_sram (
 	    end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			dma_wdata_m0_r <= '0;
 			dma_wdata_m1_r <= '0;
@@ -90,7 +90,7 @@ module pp_buf_sram (
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			ping_pong_sel_r <= 1'b0;
 			ping_pong_sel_m0_r <= 1'b0;
@@ -141,7 +141,11 @@ module pp_buf_sram (
 		.dout(m1_dout)
 	);
 
-	assign o_array_rdata = (ping_pong_sel_d1_r == 1'b0) ? m1_dout : m0_dout;
+	logic [31:0] array_rdata_r;
+	always_ff @(posedge clk) begin
+		array_rdata_r <= (ping_pong_sel_d1_r == 1'b0) ? m1_dout : m0_dout;
+	end
+	assign o_array_rdata = array_rdata_r;
 
 endmodule
 `default_nettype wire

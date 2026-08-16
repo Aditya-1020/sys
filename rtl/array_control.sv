@@ -65,7 +65,7 @@ module array_control #(
 	wire last_job_w = (next_base >= len_r);
 
 	logic last_job_r;
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			last_job_r <= 1'b0;
 		end else begin
@@ -78,7 +78,7 @@ module array_control #(
 
 	assign o_reserve = start_job;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			job_base_r <= '0;
 			buf_live_r <= 1'b0;
@@ -99,7 +99,7 @@ module array_control #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			load_w_r <= 1'b1; // post reset always load wieght
 			w_valid_r <= 1'b0;
@@ -127,7 +127,7 @@ module array_control #(
 		endcase
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			current_state <= IDLE;
 		end else begin
@@ -135,7 +135,7 @@ module array_control #(
 		end
 	end
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			rd_ptr_r <= '0;
 		end else if (tile_done) begin
@@ -150,20 +150,27 @@ module array_control #(
 	assign o_cs_array = (current_state == FETCH);
 	assign o_addr_array = job_base_r + SRAM_ADDR_W'(rd_ptr_r);
 
-	logic rd_vld_r, rd_isb_r;
-	logic [LANE_W-1:0] rd_lane_r;
+	// pipelined read (c0=addr/cs, c1=dout from macro c2=valid and update out)
+	logic rd_vld_d1, rd_vld_r;
+	logic rd_isb_d1, rd_isb_r;
+	logic [LANE_W-1:0] rd_lane_d1, rd_lane_r;
 
-	always_ff @(posedge clk or negedge rstn) begin
+	always_ff @(posedge clk) begin
 		if (!rstn) begin
-			rd_vld_r <= 1'b0;
-			rd_isb_r <= 1'b0;
+			rd_vld_d1 <= 1'b0;
+			rd_vld_r  <= 1'b0;
+			rd_isb_d1 <= 1'b0;
+			rd_isb_r  <= 1'b0;
 		end else begin
-			rd_vld_r <= o_cs_array;
-			rd_isb_r <= load_w_r && (rd_ptr_r < unsigned'(PTR_W'(MATRIX_SIZE)));
+			rd_vld_d1 <= o_cs_array;
+			rd_vld_r  <= rd_vld_d1;
+			rd_isb_d1 <= load_w_r && (rd_ptr_r < unsigned'(PTR_W'(MATRIX_SIZE)));
+			rd_isb_r  <= rd_isb_d1;
 		end
 	end
 	always_ff @(posedge clk) begin
-		rd_lane_r <= rd_ptr_r[LANE_W-1:0];
+		rd_lane_d1 <= rd_ptr_r[LANE_W-1:0];
+		rd_lane_r  <= rd_lane_d1;
 	end
 
 	assign o_b_en = rd_vld_r && rd_isb_r;
