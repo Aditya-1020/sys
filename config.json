@@ -3,7 +3,7 @@
 	"USE_SLANG": false,
 	"VERILOG_FILES": "dir::verilog_sv2v/*.v",
 	"CLOCK_PORT": "clk",
-	"CLOCK_PERIOD": 10.0,
+	"CLOCK_PERIOD": 5.0,
 	"PNR_SDC_FILE": "dir::constraints/pnr.sdc",
 	"SIGNOFF_SDC_FILE": "dir::constraints/signoff.sdc",
 
@@ -14,9 +14,8 @@
 	"FP_MACRO_HORIZONTAL_HALO": 3.84,
 	"FP_MACRO_VERTICAL_HALO": 13.72,
 
-	"PL_TARGET_DENSITY_PCT": 78,
+	"PL_TARGET_DENSITY_PCT": 75,
 
-	"IO_PIN_ORDER_CFG": "dir::constraints/pin_order.cfg",
 	"IO_PIN_H_LAYER": "met3",
 	"IO_PIN_V_LAYER": "met2",
 	"IO_PIN_MIN_DISTANCE": 3,

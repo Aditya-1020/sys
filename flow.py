@@ -7,10 +7,9 @@ from librelane.common.misc import slugify
 from librelane.flows.flow import Flow
 
 PROJECT = os.path.dirname(os.path.abspath(__file__))
-RUN_DIR = os.path.join(PROJECT, "runs", "Final")
-RUN_NAME = "Fanout-fix"
 PDK = "sky130A"
 SCL = "sky130_fd_sc_hd"
+RUN_NAME = "CleanBuild"
 
 Classic = Flow.factory.get("Classic")
 
@@ -18,6 +17,7 @@ class CustomFlow(Classic):
 	pass
 
 _STEP_DIR = re.compile(r"^(\d+)-(.+)$")
+
 
 def resolve_step_id(name: str) -> str:
 	needle = name.lower()
@@ -40,24 +40,24 @@ def resolve_step_id(name: str) -> str:
 	sys.exit(1)
 
 
-def rerun_from(step_id: str) -> None:
+def rerun_from(run_dir: str, step_id: str) -> None:
 	slug = slugify(resolve_step_id(step_id))
 	ordinals = []
-	for entry in os.listdir(RUN_DIR):
+	for entry in os.listdir(run_dir):
 		match = _STEP_DIR.match(entry)
 		if match and match.group(2) == slug:
 			ordinals.append(int(match.group(1)))
 	if not ordinals:
-		print(f"No prior run of {step_id!r} in {RUN_DIR}", file=sys.stderr)
+		print(f"No prior run of {step_id!r} in {run_dir}", file=sys.stderr)
 		sys.exit(1)
 
 	cutoff = min(ordinals)
 	removed = []
-	for entry in sorted(os.listdir(RUN_DIR)):
+	for entry in sorted(os.listdir(run_dir)):
 		match = _STEP_DIR.match(entry)
 		if not match or int(match.group(1)) < cutoff:
 			continue
-		path = os.path.join(RUN_DIR, entry)
+		path = os.path.join(run_dir, entry)
 		if os.path.isdir(path):
 			shutil.rmtree(path)
 			removed.append(entry)
@@ -68,18 +68,19 @@ def rerun_from(step_id: str) -> None:
 
 
 def main() -> None:
-	parser = argparse.ArgumentParser(description="Run the custom LibreLane flow.")
-	parser.add_argument(
-		"--rerun-from",
-		metavar="STEP",
-		help="drop this step and all later steps, then resume Final",
-	)
+	parser = argparse.ArgumentParser(description="Run the LibreLane Classic flow.")
+	parser.add_argument("--tag", default=RUN_NAME)
+	parser.add_argument("--rerun-from", metavar="STEP", help="drop this step and later, then resume")
 	parser.add_argument("-F", "--from", dest="frm", metavar="STEP")
 	parser.add_argument("-T", "--to", metavar="STEP")
 	args = parser.parse_args()
 
+	run_dir = os.path.join(PROJECT, "runs", args.tag)
 	if args.rerun_from:
-		rerun_from(args.rerun_from)
+		if not os.path.isdir(run_dir):
+			print(f"missing run dir {run_dir}", file=sys.stderr)
+			sys.exit(1)
+		rerun_from(run_dir, args.rerun_from)
 
 	flow = CustomFlow(
 		config=os.path.join(PROJECT, "config.json"),
@@ -89,7 +90,7 @@ def main() -> None:
 		design_dir=PROJECT,
 	)
 	kwargs = {k: v for k, v in {"frm": args.frm, "to": args.to}.items() if v}
-	flow.start(tag=RUN_NAME, **kwargs)
+	flow.start(tag=args.tag, **kwargs)
 
 
 if __name__ == "__main__":

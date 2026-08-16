@@ -1,26 +1,4 @@
 #!/usr/bin/env python3
-"""Summarize a LibreLane run without digging through the run directory.
-
-Reads final/metrics.json (or the last step's state_out.json for crashed runs)
-plus every *-openroad-sta* step's reports and prints:
-  1. signoff wall     - PASS/FAIL for DRC, LVS, XOR, antenna, timing checkers
-  2. timing models    - corner -> liberty/RC models, which STA stages ran each
-  3. per-corner table - setup/hold WS/TNS/violation counts for all corners
-  4. timing evolution - worst slack per PVT at every STA stage (synth -> pnr)
-  5. post-synth STA   - per-corner summary, worst path per corner, overlap
-  6. worst paths      - top violators + worst-path detail (--stage picks step)
-  7. slack histogram  - violated-path slack distribution in 1 ns buckets
-  8. design stats     - area, utilization, instances, power, routing, IR drop
-  9. flow warnings    - warning-code breakdown
-
-Usage:
-  scripts/runreport.py                 # latest run under runs/
-  scripts/runreport.py <run-name>      # runs/<run-name> or a path
-  scripts/runreport.py --paths 15 --corner nom_tt_025C_1v80
-  scripts/runreport.py --stage synth   # paths/histogram from post-synth STA
-  scripts/runreport.py --plain         # no color / no rich (logs, grep)
-"""
-
 import argparse
 import fnmatch
 import json
@@ -690,7 +668,7 @@ def section_sram_fill(console, Table, Text, run_dir):
     console.print(
         "Only the DMA-owned bank is written each fill; the array reads the other. "
         f"Typical TB traffic fills the active bank to {pct(weights_w):.1f}% (weights) "
-        f"or {pct(tiles_w):.1f}% (A rows) — live peaks: `make prof`."
+        f"or {pct(tiles_w):.1f}% (A rows)."
     )
     sdc_texts = []
     base = Path("constraints/base.sdc")

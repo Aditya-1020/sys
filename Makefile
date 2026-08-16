@@ -8,6 +8,8 @@ PYTHON ?= .venv/bin/python
 VENV_PYTHON ?= /usr/bin/python3
 
 SV_RTL = $(wildcard $(RTL_DIR)/*.sv)
+SV_PKG = $(wildcard $(RTL_DIR)/pkg_*.sv) $(wildcard $(RTL_DIR)/*_pkg.sv)
+SV_REST = $(filter-out $(SV_PKG),$(SV_RTL))
 V_MODELS = $(wildcard $(RTL_DIR)/*.v)
 V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 
@@ -38,7 +40,7 @@ GL_XSIM_DIR = $(BUILD_DIR)/xsim_gl_$(GL_TAG)
 GL_SNAP = $(TB_TOP)_gl_snap
 GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
 
-.PHONY: all venv cocotb xrun gl gl-waves prof vectors waves xrun-waves \
+.PHONY: all venv cocotb xrun gl gl-waves vectors waves xrun-waves \
 	sv2v_rtl lint liblane lib-last_run report sta-shell clean
 
 all: cocotb
@@ -48,29 +50,26 @@ $(VERILOG_SV2V) $(BUILD_DIR):
 
 .DELETE_ON_ERROR:
 
-$(VERILOG_SV2V)/%.v: $(RTL_DIR)/%.sv | $(VERILOG_SV2V)
-	@echo '`timescale 1ps/1ps' > $@
-	@sv2v -DSYNTHESIS $< >> $@
+# Convert the full SV set together so packages (sys_pkg) elaborate correctly.
+sv2v_rtl: $(SV_RTL) | $(VERILOG_SV2V)
+	@rm -f $(VERILOG_SV2V)/*.v
+	@sv2v -DSYNTHESIS $(SV_PKG) $(SV_REST) -w $(VERILOG_SV2V)
+	@for f in $(VERILOG_SV2V)/*.v; do \
+		tmp=$$(mktemp); echo '`timescale 1ps/1ps' | cat - $$f > $$tmp && mv $$tmp $$f; \
+	done
 
-sv2v_rtl: $(V_RTL)
-
-cocotb: $(SV_RTL) $(V_MODELS)
+cocotb: vectors $(SV_RTL) $(V_MODELS)
 	$(PYTHON) $(TB_DIR)/test_top.py
 
-PROF_TILES ?=
-PROF_BATCH ?=
-prof: $(SV_RTL) $(V_MODELS)
-	$(if $(PROF_TILES),PROF_TILES=$(PROF_TILES) ,)$(if $(PROF_BATCH),PROF_BATCH=$(PROF_BATCH) ,)$(PYTHON) $(TB_DIR)/prof.py
-
-$(VECTORS) &: $(TB_DIR)/test_top.py
-	$(PYTHON) $(TB_DIR)/test_top.py --gen
+$(VECTORS) &: $(TB_DIR)/gen_vectors.py rtl/pkg_sys.sv
+	$(PYTHON) $(TB_DIR)/gen_vectors.py
 
 vectors: $(VECTORS)
 
 xrun: $(SV_RTL) $(SIM_MODELS) $(TB_SRC) $(VECTORS) | $(BUILD_DIR)
 	@mkdir -p $(XSIM_DIR)
 	cd $(XSIM_DIR) && \
-		$(XVLOG) --sv -i $(CURDIR)/$(TB_DIR) $(addprefix $(CURDIR)/,$(SV_RTL) $(TB_SRC)) && \
+		$(XVLOG) --sv -i $(CURDIR)/$(TB_DIR) $(addprefix $(CURDIR)/,$(SV_PKG) $(SV_REST) $(TB_SRC)) && \
 		$(XVLOG) $(addprefix $(CURDIR)/,$(SIM_MODELS)) && \
 		$(XELAB) -debug typical -timescale 1ps/1ps -top $(TB_TOP) -snapshot $(XSIM_SNAP) && \
 		$(XSIM) $(XSIM_SNAP) -testplusarg wave=$(TB_TOP).vcd $(XSIM_ARGS)
