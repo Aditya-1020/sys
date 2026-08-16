@@ -40,30 +40,29 @@ module pe #(
 		.o_carry(csa_carry)
 	);
 
-	// One sync-reset policy for control; datapath regs hold when disabled (no X on release).
 	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			en_r <= 1'b0;
-			a_r  <= '0;
-			w_r  <= '0;
-			pp_lo_r   <= '0;
-			pp_hi_r   <= '0;
-			mult_pipe <= '0;
-			acc_s <= '0;
-			acc_c <= '0;
 		end else begin
 			en_r <= i_enable;
-			if (i_enable)
-				a_r <= i_a;
-			if (i_w_load)
-				w_r <= i_b;
-			pp_lo_r <= a_r * signed'({1'b0, w_r[HALF_W-1:0]});
-			pp_hi_r <= a_r * signed'(w_r[DATA_WIDTH-1:HALF_W]);
-			mult_pipe <= (PROD_W'(pp_hi_r) <<< HALF_W) + PROD_W'(pp_lo_r);
-			if (i_enable) begin
-				acc_s <= signed'(csa_sum);
-				acc_c <= signed'(csa_carry);
-			end
+		end
+	end
+
+	always_ff @(posedge clk) begin
+		if (i_enable) begin
+			a_r <= i_a;
+		end
+		if (i_w_load) begin
+			w_r <= i_b;	
+		end
+
+		pp_lo_r <= a_r * signed'({1'b0, w_r[HALF_W-1:0]});
+		pp_hi_r <= a_r * signed'(w_r[DATA_WIDTH-1:HALF_W]);
+		mult_pipe <= (PROD_W'(pp_hi_r) <<< HALF_W) + PROD_W'(pp_lo_r);
+
+		if (i_enable) begin
+			acc_s <= signed'(csa_sum);
+			acc_c <= signed'(csa_carry);
 		end
 	end
 

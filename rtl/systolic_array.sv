@@ -40,16 +40,11 @@ module systolic_array #(
 		end
 	end
 
+	// dp
 	always_ff @(posedge clk) begin
-		if (!rstn) begin
-			b_lane_r  <= '0;
-			b_wdata_r <= '0;
-			load_a    <= '0;
-		end else begin
-			b_lane_r  <= i_b_lane;
-			b_wdata_r <= i_b_wdata;
-			load_a    <= i_ld_a;
-		end
+		b_lane_r <= i_b_lane;
+		b_wdata_r <= i_b_wdata;
+		load_a <= i_ld_a;
 	end
 
 	// valid delay line
@@ -97,11 +92,7 @@ module systolic_array #(
 		for (d = 1; d < ARRAY_ROWS; d = d + 1) begin : gen_a_skew
 			logic [ROW_W-1:0] stage_r;
 			always_ff @(posedge clk) begin
-				if (!rstn) begin
-					stage_r <= '0;
-				end else begin
-					stage_r <= a_dly[d-1];
-				end
+				stage_r <= a_dly[d-1];
 			end
 			always_comb begin
 				a_dly[d] = stage_r;
