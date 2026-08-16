@@ -62,25 +62,22 @@ module pe #(
 		mult_pipe <= (PROD_W'(pp_hi_r) <<< HALF_W) + PROD_W'(pp_lo_r);
 	end
 
+	
 	// carry same acucmulator
 	logic signed [ACC_WIDTH-1:0] acc_s, acc_c;
 	wire signed [ACC_WIDTH-1:0] mult_ext = ACC_WIDTH'(mult_pipe);
 
 	logic [ACC_WIDTH-1:0] csa_sum;
 	logic [ACC_WIDTH-1:0] csa_carry;
-	assign csa_carry[0] = 1'b0;
-
-	genvar b;
-	generate
-		for (b = 0; b < ACC_WIDTH; b = b + 1) begin : gen_cs
-			assign csa_sum[b] = i_psum_s[b] ^ i_psum_c[b] ^ mult_ext[b];
-			wire carry_out_b = (i_psum_s[b] & i_psum_c[b]) | (i_psum_s[b] & mult_ext[b]) | (i_psum_c[b] & mult_ext[b]);
-
-			if (b < ACC_WIDTH-1) begin : gen_csa_carry
-				assign csa_carry[b+1] = carry_out_b;
-			end
-		end
-	endgenerate
+	csa #(
+		.WIDTH(ACC_WIDTH)
+	 ) csa (
+		.i_a    (i_psum_s),
+		.i_b    (i_psum_c),
+		.i_c    (mult_ext),
+		.o_sum  (csa_sum),
+		.o_carry(csa_carry)
+	);
 
 	always_ff @(posedge clk) begin
 		if (i_enable) begin
