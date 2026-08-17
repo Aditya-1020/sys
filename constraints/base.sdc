@@ -25,6 +25,15 @@ if {[llength $_sram_dout] > 0} {
 }
 unset _sram_dout
 
+set _ptr_add [get_nets -quiet {u_sys_ctrl.src_ptr_next[*] u_sys_ctrl.dst_ptr_next[*]}]
+if {[llength $_ptr_add] > 0} {
+    set_multicycle_path 2 -setup -through $_ptr_add
+    set_multicycle_path 1 -hold  -through $_ptr_add
+} else {
+    puts "WARNING: sys_ctrl pointer-adder nets not found; timing will be pessimistic"
+}
+unset _ptr_add
+
 set_driving_cell -lib_cell sky130_fd_sc_hd__buf_4 -pin X [get_ports rstn]
 
 set AXI_INPUTS  [get_ports -quiet {i_s_axil_* i_m_axi_*}]

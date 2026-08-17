@@ -21,7 +21,7 @@
 	"IO_PIN_MIN_DISTANCE": 3,
 	"IO_PIN_CORNER_AVOIDANCE": 10,
 
-	"SYNTH_STRATEGY": "AREA 3",
+	"SYNTH_STRATEGY": "DELAY 2",
 	"SYNTH_HIERARCHY_MODE": "flatten",
 	"ERROR_ON_UNMAPPED_CELLS": true,
 
@@ -34,8 +34,6 @@
 	"CTS_MACRO_CLUSTERING_SIZE": 10,
 	"CTS_MACRO_CLUSTERING_MAX_DIAMETER": 60,
 	"CTS_BALANCE_LEVELS": true,
-	"CTS_ROOT_BUFFER": "sky130_fd_sc_hd__clkbuf_16",
-	"CTS_CLK_BUFFERS": ["sky130_fd_sc_hd__clkbuf_4", "sky130_fd_sc_hd__clkbuf_8", "sky130_fd_sc_hd__clkbuf_16"],
 
 	"CTS_DELAY_BUFFER_DERATE_PCT": 0,
 	"CTS_CORNERS": ["nom_tt_025C_1v80", "max_ss_100C_1v60"],

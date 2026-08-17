@@ -55,8 +55,9 @@ module axi_lite_csr #(
 	output wire csr_result_rd
 );
 	localparam integer ADDR_LSB = $clog2(DATA_WIDTH)-3;
-	localparam integer IDX_W = ADDR_WIDTH - ADDR_LSB;
 	localparam integer NREG = 7; // 0x00 to 0x18
+	localparam integer SEL_W = $clog2(NREG);
+	localparam integer SKD_W = SEL_W + 1;
 
 	localparam integer IDX_CTRL = 0; // 0x00 RW
 	localparam integer IDX_STATUS = 1;// 0x04 RO
@@ -89,21 +90,24 @@ module axi_lite_csr #(
 		end
 	endfunction
 
-	function automatic logic [NREG-1:0] reg_onehot (input logic [IDX_W-1:0] idx);
+	function automatic logic [NREG-1:0] reg_onehot (input logic [SKD_W-1:0] skd);
 		reg_onehot = '0;
 		for (int i = 0; i < NREG; i++) begin
-			if (idx == IDX_W'(i)) begin
+			if (skd[SEL_W] && (skd[SEL_W-1:0] == SEL_W'(i))) begin
 				reg_onehot[i] = 1'b1;
 			end
 		end
 	endfunction
 
-	wire [NREG-1:0] awdec = reg_onehot(i_s_axil_awaddr[ADDR_WIDTH-1:ADDR_LSB]);
-	wire [NREG-1:0] ardec = reg_onehot(i_s_axil_araddr[ADDR_WIDTH-1:ADDR_LSB]);
-	logic [NREG-1:0] awskd_sel, arskd_sel;
+	wire [SKD_W-1:0] awdec = {~|i_s_axil_awaddr[ADDR_WIDTH-1:ADDR_LSB+SEL_W], i_s_axil_awaddr[ADDR_LSB+SEL_W-1:ADDR_LSB]};
+	wire [SKD_W-1:0] ardec = {~|i_s_axil_araddr[ADDR_WIDTH-1:ADDR_LSB+SEL_W], i_s_axil_araddr[ADDR_LSB+SEL_W-1:ADDR_LSB]};
+
+	wire [SKD_W-1:0] awskd_q, arskd_q;
+	wire [NREG-1:0] awskd_sel = reg_onehot(awskd_q);
+	wire [NREG-1:0] arskd_sel = reg_onehot(arskd_q);
 
 	skid_buffer #(
-		.N(NREG)
+		.N(SKD_W)
 	) aw_skid (
 		.clk    (aclk),
 		.rstn   (aresetn),
@@ -112,7 +116,7 @@ module axi_lite_csr #(
 		.i_ready(axil_wr_ready),
 		.o_valid(awskd_valid),
 		.i_data (awdec),
-		.o_data (awskd_sel)
+		.o_data (awskd_q)
 	);
 
 	logic w_full_r;
@@ -145,7 +149,7 @@ module axi_lite_csr #(
 	assign o_s_axil_wready = wready_r;
 
 	skid_buffer #(
-		.N(NREG)
+		.N(SKD_W)
 	) ar_skid (
 		.clk    (aclk),
 		.rstn   (aresetn),
@@ -154,7 +158,7 @@ module axi_lite_csr #(
 		.i_ready(axil_rd_ready),
 		.o_valid(arskd_valid),
 		.i_data (ardec),
-		.o_data (arskd_sel)
+		.o_data (arskd_q)
 	);
 
 	logic res_pop_r;
@@ -162,7 +166,7 @@ module axi_lite_csr #(
 	wire rd_ch_free = !axil_rvalid_r || i_s_axil_rready;
 	wire res_rd_ok = i_fifo_valid && !res_pop_r;
 
-	assign axil_wr_ready = awskd_valid && wskd_valid && (!axil_bvalid_r || i_s_axil_bready);
+	assign axil_wr_ready = awskd_valid && wskd_valid && !axil_bvalid_r;
 	assign axil_rd_ready = arskd_valid && rd_ch_free && (!ar_is_result || res_rd_ok);
 
 	always_ff @(posedge aclk or negedge aresetn) begin

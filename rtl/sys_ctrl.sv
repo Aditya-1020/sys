@@ -59,13 +59,21 @@ module sys_ctrl (
 	wire auto_fill_arm = auto_fill_en && !auto_fill_r;
 
 	logic [31:0] dst_ptr_r;
+
+	localparam int TB_W = $clog2(TILE_BYTES + 1);
+
+	wire [TB_W:0]    dst_lo_sum = {1'b0, dst_ptr_r[TB_W-1:0]} + {1'b0, TB_W'(TILE_BYTES)};
+	wire [31-TB_W:0] dst_hi_inc = dst_ptr_r[31:TB_W] + 1'b1;
+	(* keep *) wire [31:0] dst_ptr_next =
+		{(dst_lo_sum[TB_W] ? dst_hi_inc : dst_ptr_r[31:TB_W]), dst_lo_sum[TB_W-1:0]};
+
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			dst_ptr_r <= '0;
 		end else if (auto_st_arm || wdma_start_manual) begin
 			dst_ptr_r <= csr_dst_addr;
 		end else if (aw_fire && auto_st_en) begin
-			dst_ptr_r <= dst_ptr_r + 32'(TILE_BYTES);
+			dst_ptr_r <= dst_ptr_next;
 		end
 	end
 
@@ -82,28 +90,39 @@ module sys_ctrl (
 
 	logic [31:0] src_ptr_r;
 	logic [NJOB_W-1:0] fill_left_r;
-	wire auto_fill_pend = auto_fill_en && (fill_left_r != '0);
+
+	logic fill_nz_r;
+	wire auto_fill_pend = auto_fill_en && fill_nz_r;
 	wire auto_fill_go = auto_fill_pend && !dma_busy;
-	wire [31:0] fill_stride = {23'b0, csr_len[LEN_W-1:0], 2'b00};
+
+	localparam int STRIDE_W = LEN_W + 2;
+
+	wire [STRIDE_W-1:0] fill_stride = {csr_len[LEN_W-1:0], 2'b00};
+	wire [STRIDE_W:0] src_lo_sum  = {1'b0, src_ptr_r[STRIDE_W-1:0]} + {1'b0, fill_stride};
+	wire [31-STRIDE_W:0] src_hi_inc  = src_ptr_r[31:STRIDE_W] + 1'b1;
+	(* keep *) wire [31:0] src_ptr_next = {(src_lo_sum[STRIDE_W] ? src_hi_inc : src_ptr_r[31:STRIDE_W]), src_lo_sum[STRIDE_W-1:0]};
 
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
 			src_ptr_r <= '0;
 			fill_left_r <= '0;
+			fill_nz_r <= 1'b0;
 		end else begin
 			if (auto_fill_arm) begin
 				src_ptr_r <= csr_src_addr;
 			end else if (dma_start_manual) begin
 				src_ptr_r <= csr_src_addr;
 			end else if (ar_fire && auto_fill_en) begin
-				src_ptr_r <= src_ptr_r + fill_stride;
+				src_ptr_r <= src_ptr_next;
 			end
 
 			if (auto_fill_arm) begin
 				fill_left_r <= csr_njobs[NJOB_W-1:0];
+				fill_nz_r   <= (csr_njobs[NJOB_W-1:0] != '0);
 			end
 			else if (auto_fill_go) begin
 				fill_left_r <= fill_left_r - 1'b1;
+				fill_nz_r <= (fill_left_r == NJOB_W'(1)) ? 1'b0 : 1'b1;
 			end
 		end
 	end

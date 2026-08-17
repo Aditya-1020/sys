@@ -23,7 +23,7 @@ module systolic_array #(
 );
 	localparam integer ARRAY_ROWS = MATRIX_SIZE;
 	localparam integer ARRAY_COLS = MATRIX_SIZE;
-	localparam integer PE_LATENCY = 3; // a_r -> mult_s1 -> mult_pipe -> accumulator
+	localparam integer PE_LATENCY = 4;
 	localparam integer RESOLVE_LAT = 2; // carry-save -> binary resolve, split across 2 cycles (see gen_resolve)
 	localparam integer DRAIN_LAT = ARRAY_ROWS + PE_LATENCY + RESOLVE_LAT; // 8
 	localparam integer PIPE_DEPTH = DRAIN_LAT + ARRAY_COLS - 1; // 11

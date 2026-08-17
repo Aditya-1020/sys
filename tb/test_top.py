@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -10,9 +11,12 @@ VECTORS = ROOT / "tb" / "vectors"
 MACRO = ROOT / "sram22_64x32m4w8"
 
 
+_PKG_DECL = re.compile(r"^\s*package\s+\w+\s*;", re.M)
+
+
 def rtl_sources():
     sv = sorted(RTL.glob("*.sv"))
-    pkgs = [p for p in sv if p.name.startswith("pkg_")]
+    pkgs = [p for p in sv if _PKG_DECL.search(p.read_text())]
     rest = [p for p in sv if p not in pkgs]
     macros = [MACRO / b.name if (MACRO / b.name).is_file() else b for b in sorted(RTL.glob("*.v"))]
     return pkgs + rest + macros

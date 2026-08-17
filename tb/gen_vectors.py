@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-PKG = ROOT / "rtl" / "pkg_sys.sv"
+PKG = ROOT / "rtl" / "sys_pkg.sv"
 VECTORS = ROOT / "tb" / "vectors"
 
 SRC_BASE, DST_BASE, ALT_DST = 0x1000, 0x2000, 0x3000

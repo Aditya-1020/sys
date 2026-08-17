@@ -52,8 +52,7 @@ module res_cap_fifo #(
 
 			always_ff @(posedge clk) begin
 				if (wr_en) begin
-					mem[wr_ptr[c]][RESULT_WIDTH*c +: RESULT_WIDTH] <=
-						i_result_data[RESULT_WIDTH*c +: RESULT_WIDTH];
+					mem[wr_ptr[c]][RESULT_WIDTH*c +: RESULT_WIDTH] <= i_result_data[RESULT_WIDTH*c +: RESULT_WIDTH];
 				end
 			end
 		end
@@ -98,14 +97,17 @@ module res_cap_fifo #(
 	endgenerate
 
 	wire [BEAT_W-1:0] beat_data = beat_flat[beat_idx*BEAT_W +: BEAT_W];
-	wire beat_str = str_lut[beat_idx];
-	wire beat_adv = adv_lut[beat_idx];
+	logic beat_str_r, beat_adv_r;
+	wire [BI_W-1:0] beat_idx_nxt =
+		(beat_idx == BI_W'(TILE_BEATS-1)) ? '0 : (beat_idx + 1'b1);
+
+	wire beat_str = beat_str_r;
+	wire beat_adv = beat_adv_r;
 
 	logic [BEAT_W-1:0] head_r;
 	logic head_valid_r;
 
 	wire beat_ready = (stg_n != 2'd0) && (!beat_str || (stg_n == 2'd2));
-	// (!head_valid_r || (head_valid_r && rd_en)) reduces to (!head_valid_r || rd_en)
 	wire transfer = beat_ready && (!head_valid_r || rd_en);
 	wire consume = head_valid_r && rd_en;
 	wire row_retire = transfer && beat_adv;
@@ -142,9 +144,13 @@ module res_cap_fifo #(
 
 	always_ff @(posedge clk) begin
 		if (!rstn) begin
-			beat_idx <= '0;
+			beat_idx   <= '0;
+			beat_str_r <= str_lut[0];
+			beat_adv_r <= adv_lut[0];
 		end else if (transfer) begin
-			beat_idx <= (beat_idx == BI_W'(TILE_BEATS-1)) ? '0 : (beat_idx + 1'b1);
+			beat_idx   <= beat_idx_nxt;
+			beat_str_r <= str_lut[beat_idx_nxt];
+			beat_adv_r <= adv_lut[beat_idx_nxt];
 		end
 	end
 
