@@ -9,13 +9,14 @@ module pp_buf_sram (
 
 	input wire i_dma_cs,
 	input wire i_dma_we,
-	input wire [3:0] i_dma_mask,
 	input wire [5:0] i_dma_addr, // 64 words per macro
 	input wire [31:0] i_dma_wdata,
 	input wire i_cs_array, // array chip sel
 	input wire [5:0] i_addr_array,
 	output wire [31:0] o_array_rdata // output to pes
 );
+	localparam logic [3:0] DMA_WMASK = sys_pkg::AXI_SRAM_DMA_MASK;
+
 	wire [31:0] m0_dout, m1_dout;
 
 	(* keep *) logic [1:0] m0_rel_r;
@@ -71,18 +72,12 @@ module pp_buf_sram (
 	end
 
 	always_ff @(posedge clk) begin
-		if (!rstn) begin
-			dma_wdata_m0_r <= '0;
-			dma_wdata_m1_r <= '0;
-			dma_addr_r <= '0;
-		end else begin
-			dma_addr_r <= i_dma_addr;
-			if (m0_wdata_en) begin
-				dma_wdata_m0_r <= i_dma_wdata;
-			end
-			if (m1_wdata_en) begin
-				dma_wdata_m1_r <= i_dma_wdata;
-			end
+		dma_addr_r <= i_dma_addr;
+		if (m0_wdata_en) begin
+			dma_wdata_m0_r <= i_dma_wdata;
+		end
+		if (m1_wdata_en) begin
+			dma_wdata_m1_r <= i_dma_wdata;
 		end
 	end
 
@@ -120,7 +115,7 @@ module pp_buf_sram (
 		.rstb(m0_rstb),
 		.ce(m0_ce),
 		.we(m0_we),
-		.wmask(i_dma_mask),
+		.wmask(DMA_WMASK),
 		.addr(m0_addr),
 		.din(dma_wdata_m0_r),
 		.dout(m0_dout)
@@ -131,7 +126,7 @@ module pp_buf_sram (
 		.rstb(m1_rstb),
 		.ce(m1_ce),
 		.we(m1_we),
-		.wmask(i_dma_mask),
+		.wmask(DMA_WMASK),
 		.addr(m1_addr),
 		.din(dma_wdata_m1_r),
 		.dout(m1_dout)

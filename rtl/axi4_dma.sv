@@ -38,7 +38,6 @@ module axi4_dma #(
 	// sram p0
 	output wire o_dma_cs,
 	output wire o_dma_we,
-	output wire [3:0] o_dma_mask, // 4 byte lane
 	output wire [SRAM_ADDR_W-1:0] o_dma_addr,
 	output wire [ROW_W-1:0] o_dma_wdata,
 
@@ -48,7 +47,6 @@ module axi4_dma #(
 	input wire i_array_done
 );
 	assign o_dma_we = 1'b1;
-	assign o_dma_mask = 4'hF; // full row
 	assign o_dma_wdata = i_m_rdata;
 
 	typedef enum logic [1:0] {
