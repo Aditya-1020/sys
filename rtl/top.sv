@@ -91,7 +91,6 @@ module top #(
 	wire [31:0] csr_ctrl, csr_src_addr, csr_len, csr_dst_addr, csr_njobs, csr_status;
 	wire dma_busy, dma_done, dma_err, dma_fill_done, dma_swap, array_release;
 	wire dma_cs, dma_we;
-	wire [3:0] dma_mask;
 	wire [SRAM_ADDR_W-1:0] dma_addr;
 	wire [ROW_W-1:0] dma_wdata;
 	wire arr_ctrl_cs_p1;
@@ -224,7 +223,6 @@ module top #(
 		.o_m_rready(o_m_axi_rready),
 		.o_dma_cs(dma_cs),
 		.o_dma_we(dma_we),
-		.o_dma_mask(dma_mask),
 		.o_dma_addr(dma_addr),
 		.o_dma_wdata(dma_wdata),
 		.o_swap(dma_swap),
@@ -239,7 +237,6 @@ module top #(
 		.o_ping_pong_sel(ping_pong_sel),
 		.i_dma_cs(dma_cs),
 		.i_dma_we(dma_we),
-		.i_dma_mask(dma_mask),
 		.i_dma_addr(dma_addr),
 		.i_dma_wdata(dma_wdata),
 		.i_cs_array(arr_ctrl_cs_p1),
