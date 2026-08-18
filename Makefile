@@ -41,7 +41,7 @@ GL_SNAP = $(TB_TOP)_gl_snap
 GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
 
 .PHONY: all venv cocotb xrun gl gl-waves vectors waves xrun-waves \
-	sv2v_rtl lint liblane lib-last_run report pinreport sta-gui sta-shell sta-corners clean
+	sv2v_rtl lint lib-last_run report pinreport sta-gui sta-shell sta-corners clean
 
 all: cocotb
 
@@ -50,7 +50,6 @@ $(VERILOG_SV2V) $(BUILD_DIR):
 
 .DELETE_ON_ERROR:
 
-# Convert the full SV set together so packages (sys_pkg) elaborate correctly.
 sv2v_rtl: $(SV_RTL) | $(VERILOG_SV2V)
 	@rm -f $(VERILOG_SV2V)/*.v
 	@sv2v -DSYNTHESIS $(SV_PKG) $(SV_REST) -w $(VERILOG_SV2V)
@@ -61,7 +60,7 @@ sv2v_rtl: $(SV_RTL) | $(VERILOG_SV2V)
 cocotb: vectors $(SV_RTL) $(V_MODELS)
 	$(PYTHON) $(TB_DIR)/test_top.py
 
-$(VECTORS) &: $(TB_DIR)/gen_vectors.py rtl/pkg_sys.sv
+$(VECTORS) &: $(TB_DIR)/gen_vectors.py rtl/sys_pkg.sv
 	$(PYTHON) $(TB_DIR)/gen_vectors.py
 
 vectors: $(VECTORS)
@@ -88,10 +87,6 @@ venv:
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(addprefix -v ,$(V_MODELS))
 
-# Interactive timing on a finished run, every corner loaded at once.
-#   RUN=<tag>       pick a run (default: newest run with an STA step)
-#   CORNER=<name>   corner that corner-less commands default to
-#   CORNERS=<glob>  load only matching corners, e.g. CORNERS='nom_*'
 STADEBUG_ARGS = $(RUN) $(if $(CORNER),-c $(CORNER),) $(if $(CORNERS),-k '$(CORNERS)',)
 
 sta-gui:
@@ -104,18 +99,10 @@ sta-corners:
 	scripts/stadebug $(RUN) -l
 
 RUN ?=
-LL_RUN    := $(if $(RUN),--run-tag $(RUN),)
-LL_RENDER := $(if $(RUN),--run-tag $(RUN),--last-run)
-LL_RUNDIR := $(if $(RUN),runs/$(RUN),runs/RUN_*)
-
-liblane: $(V_RTL)
-	librelane $(LL_RUN) --to KLayout.StreamOut $(LIBLANE_CONFIG)
-	klayout -b -r scripts/strip_orphan_tops.py \
-		-rd gds=$$(ls -dt $(LL_RUNDIR)/*-magic-streamout/top.gds | head -1) -rd top=top
-	librelane $(LL_RENDER) --from KLayout.Render $(LIBLANE_CONFIG)
+LIBLANE := python3 scripts/liblane.py
 
 lib-last_run:
-	librelane --last-run --flow openinopenroad $(LIBLANE_CONFIG)
+	$(LIBLANE) --last-run --flow openinopenroad $(LIBLANE_CONFIG)
 
 report:
 	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)

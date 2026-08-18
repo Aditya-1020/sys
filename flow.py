@@ -5,20 +5,26 @@ import shutil
 import sys
 from librelane.common.misc import slugify
 from librelane.flows.flow import Flow
-from steps import FlowSummary, SynthFanoutCheck
+from librelane.steps.odb import InsertECOBuffers
+from steps import CTS, FlowSummary, SynthFanoutCheck
 
 PROJECT = os.path.dirname(os.path.abspath(__file__))
 PDK = "sky130A"
 SCL = "sky130_fd_sc_hd"
-RUN_NAME = "CleanBuild"
+RUN_NAME = "Final"
+CONFIG_NAME = "config.json"
 
 Classic = Flow.factory.get("Classic")
 
 class CustomFlow(Classic):
 	Substitutions = {
 		"+Yosys.Synthesis": SynthFanoutCheck,
+		"OpenROAD.CTS": CTS,
+		"-OpenROAD.DetailedRouting": InsertECOBuffers,
 		"+Misc.ReportManufacturability": FlowSummary,
 	}
+
+	gating_config_vars = {**Classic.gating_config_vars, "Custom.CTS": ["RUN_CTS"]}
 
 _STEP_DIR = re.compile(r"^(\d+)-(.+)$")
 
@@ -87,7 +93,7 @@ def main() -> None:
 		rerun_from(run_dir, args.rerun_from)
 
 	flow = CustomFlow(
-		config=os.path.join(PROJECT, "config.json"),
+		config=os.path.join(PROJECT, CONFIG_NAME),
 		pdk=PDK,
 		scl=SCL,
 		pdk_root=os.environ["PDK_ROOT"],

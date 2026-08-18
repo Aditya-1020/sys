@@ -6,9 +6,11 @@ from collections import Counter
 from librelane.config.variable import Variable
 from librelane.logging.logger import console, rule
 from librelane.state.design_format import DesignFormat
+from librelane.steps import OpenROAD
 from librelane.steps.step import Step
-
 from rich.table import Table
+
+_PROJECT = os.path.dirname(os.path.abspath(__file__))
 
 _CONN = re.compile(r"\.\w+\(\s*([^)]*?)\s*\)")
 _CONST = re.compile(r"^\d*'[bdho]?[0-9a-fxzA-FXZ_]+$")
@@ -68,13 +70,38 @@ class SynthFanoutCheck(Step): # report high fanout nets in synthesis nl
         console.print(table)
 
         if over:
-            self.warn(f"{over} net(s) exceed a fanout of {limit}; "
-                      f"worst is {worst[0][0]} with {worst[0][1]} loads")
+            self.warn(f"{over} net(s) exceed a fanout of {limit}; " f"worst is {worst[0][0]} with {worst[0][1]} loads")
 
         return {}, {
             "synthesis__max_fanout": worst[0][1],
             "synthesis__high_fanout_net__count": over,
         }
+
+
+@Step.factory.register()
+class CTS(OpenROAD.CTS):
+    id = "Custom.CTS"
+    name = "Clock Tree Synthesis"
+    long_name = "Clock Tree Synthesis (local script)"
+
+    config_vars = OpenROAD.CTS.config_vars + [
+        Variable(
+            "CTS_NO_INSERTION_DELAY",
+            bool,
+            "stop CTS balacing the macro tree against register tree"
+            "avoid buffering with macro tree",
+            default=False,
+        ),
+        Variable(
+            "CTS_DONT_USE_DUMMY_LOAD",
+            bool,
+            "stop CTS inserting capacitive ballast cells to equalise latency",
+            default=False,
+        ),
+    ]
+
+    def get_script_path(self):
+        return os.path.join(_PROJECT, "scripts", "openroad", "cts.tcl")
 
 
 _CHECKS = [
@@ -92,7 +119,6 @@ _CHECKS = [
 ]
 
 _WS = "timing__setup__ws__corner:"
-
 
 @Step.factory.register()
 class FlowSummary(Step):
