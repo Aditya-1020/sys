@@ -28,18 +28,19 @@ Signoff is checked across all 9 corners.
 - **Two 64×32 SRAM macros** (`sram22_64x32m4w8`) as ping-pong tile buffers.
 - Auto-fill and auto-store keep the array fed without CPU round-trips.
 
-```
+```sh
 rtl/
-  top.sv              top level
-  systolic_array.sv   the 4×4 array
-  pe.sv  csa.sv       processing element, carry-save adder
-  array_control.sv    tile sequencing, SRAM addressing
-  sys_ctrl.sv         run control, pointers, status
-  axi_lite_csr.sv     CSR block
-  axi4_dma.sv         read DMA
-  axi4_dma_wr.sv      write DMA
-  res_cap_fifo.sv     result capture FIFO
-  pp_buf_sram.sv      ping-pong SRAM wrapper
+  top.sv              # top level
+  systolic_array.sv   # the 4×4 array
+  pe.sv, csa.sv       # processing element, carry-save adder
+  array_control.sv    # tile sequencing, SRAM addressing
+  sys_ctrl.sv         # run control, pointers, status
+  axi_lite_csr.sv     # CSR block
+  axi4_dma.sv         # read DMA
+  axi4_dma_wr.sv      # write DMA
+  res_cap_fifo.sv     # result capture FIFO
+  pp_buf_sram.sv      # ping-pong SRAM wrapper
+final_run/            # contains the final PnR database and reports
 ```
 
 ## Build
