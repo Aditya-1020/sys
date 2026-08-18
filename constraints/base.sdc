@@ -50,8 +50,9 @@ if {[llength $AXI_INPUTS] > 0} {
 
 if {[llength $AXI_OUTPUTS] > 0} {
     group_path -name AXI_OUTPUTS -to $AXI_OUTPUTS
-
-    set_output_delay -clock SYS_CLK -max [expr {0.20 * $SYS_PERIOD}] $AXI_OUTPUTS
+    
+    # 0.10 * 0.50 sets the time to 4.75 to outputs ~ -0.200 fixed using clock tree
+    set_output_delay -clock SYS_CLK -max [expr {0.10 * $SYS_PERIOD}] $AXI_OUTPUTS
     set_output_delay -clock SYS_CLK -min 0.00 $AXI_OUTPUTS
 
     set_load 0.03 $AXI_OUTPUTS
