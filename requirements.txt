@@ -1,0 +1,16 @@
+# .venv for simulation and reporting: python3 -m venv .venv && make venv
+# PnR itself runs under the nix environment, which supplies librelane plus the
+# openroad / yosys / magic / klayout binaries. librelane is listed here only so
+# flow.py and steps.py import cleanly outside nix.
+
+cocotb==2.0.1
+numpy==2.5.1
+
+altair==6.2.2
+pandas==3.0.5
+rich==15.0.0
+
+librelane==3.0.9
+
+# optional: static PNG/SVG export for compare.py charts (they save as HTML without it)
+# vl-convert-python==1.7.0

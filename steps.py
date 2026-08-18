@@ -182,7 +182,7 @@ class FlowSummary(Step):
             for corner in corners:
                 evo.add_column(corner, justify="right")
             for name, slacks in stages:
-                evo.add_row(name, *(f"{slacks[c]:+.3f}" if c in slacks else "—" for c in corners))
+                evo.add_row(name, *(f"{slacks[c]:+.3f}" if c in slacks else "-" for c in corners))
             console.print(evo)
 
         max_fanout = m.get("synthesis__max_fanout")

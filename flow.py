@@ -83,6 +83,7 @@ def main() -> None:
 	parser.add_argument("--rerun-from", metavar="STEP", help="drop this step and later, then resume")
 	parser.add_argument("-F", "--from", dest="frm", metavar="STEP")
 	parser.add_argument("-T", "--to", metavar="STEP")
+	parser.add_argument("--config", default=CONFIG_NAME, help=f"config file to use (default: {CONFIG_NAME}); use config_eco.json to apply the ECO buffers")
 	args = parser.parse_args()
 
 	run_dir = os.path.join(PROJECT, "runs", args.tag)
@@ -93,7 +94,7 @@ def main() -> None:
 		rerun_from(run_dir, args.rerun_from)
 
 	flow = CustomFlow(
-		config=os.path.join(PROJECT, CONFIG_NAME),
+		config=os.path.join(PROJECT, args.config),
 		pdk=PDK,
 		scl=SCL,
 		pdk_root=os.environ["PDK_ROOT"],

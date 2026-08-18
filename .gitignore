@@ -31,5 +31,5 @@ verilog_sv2v/*
 notes/
 runs/
 
-scripts/pinreport.py
 md/
+plots/

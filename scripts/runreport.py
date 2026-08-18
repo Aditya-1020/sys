@@ -61,7 +61,7 @@ def _load_ui(plain):
 
 def fnum(v, prec=4):
     if v is None:
-        return "—"
+        return "-"
     if isinstance(v, float):
         return f"{v:.{prec}f}"
     return str(v)
@@ -69,7 +69,7 @@ def fnum(v, prec=4):
 
 def fmt_power(w):
     if w is None:
-        return "—"
+        return "-"
     for unit, scale in (("W", 1), ("mW", 1e-3), ("µW", 1e-6), ("nW", 1e-9)):
         if abs(w) >= scale:
             s = f"{w / scale:.3g} {unit}"
@@ -77,27 +77,27 @@ def fmt_power(w):
     else:
         s = f"{w:.3g} W"
     if abs(w) > 1e3:
-        s += "  (absurd — lib power data suspect)"
+        s += "  (absurd - lib power data suspect)"
     return s
 
 
 def fmt_volts(v):
     if v is None:
-        return "—"
+        return "-"
     for unit, scale in (("V", 1), ("mV", 1e-3), ("µV", 1e-6)):
         if abs(v) >= scale:
             s = f"{v / scale:.3g} {unit}"
             break
     else:
         s = f"{v:.3g} V"
-    if abs(v) > 2:  # more than a sky130 rail — garbage from bad lib power data
+    if abs(v) > 2:  # more than a sky130 rail - garbage from bad lib power data
         s += " (absurd)"
     return s
 
 
 def fmt_area(um2):
     if um2 is None:
-        return "—"
+        return "-"
     if um2 >= 1e6:
         return f"{um2 / 1e6:.3f} mm²"
     return f"{um2:,.0f} µm²"
@@ -204,7 +204,7 @@ def stage_default_corner(stage):
 def stage_ran_corners(stage):
     """Corners a stage actually evaluated. Mid-pnr STA steps have no corner
     subdirs (reports sit flat in the step dir) and run the default corner
-    only — their state_out metrics still carry stale values for the rest."""
+    only - their state_out metrics still carry stale values for the rest."""
     dirs = stage_corners(stage)
     if dirs:
         return dirs
@@ -333,7 +333,7 @@ def section_signoff(console, Table, Text, m):
     for label, key, sev in CHECKS:
         v = m.get(key)
         if v is None:
-            t.add_row(label, "—", Text("n/a", style="dim"))
+            t.add_row(label, "-", Text("n/a", style="dim"))
         elif v == 0:
             t.add_row(label, "0", Text("PASS", style="bold green"))
         else:
@@ -362,7 +362,7 @@ def section_corners(console, Table, Text, m, title="TIMING PER CORNER"):
     def cell(key, corner, count=False):
         v = m.get(f"{key}__corner:{corner}")
         if v is None:
-            return Text("—", style="dim")
+            return Text("-", style="dim")
         bad = (v > 0) if count else (v < 0)
         s = str(v) if count else f"{v:.3f}"
         return Text(s, style="red" if bad else "green")
@@ -441,13 +441,13 @@ def section_timing_models(console, Table, Text, stages):
         if len(present) == len(stages):
             ran = Text("all", style="green")
         elif not present:
-            ran = Text("—", style="dim")
+            ran = Text("-", style="dim")
         else:
             missing = [s.label for s in stages if s not in present]
             ran = ("all except " + ", ".join(missing) if len(missing) <= 2
                    else ", ".join(s.label for s in present))
         t.add_row(c + (" *" if c == default else ""), c.split("_")[0],
-                  ", ".join(std) or "—", ", ".join(mac) or "—", ran)
+                  ", ".join(std) or "-", ", ".join(mac) or "-", ran)
     console.print(t)
     base = []
     if std_stems:
@@ -483,7 +483,7 @@ def section_evolution(console, Table, Text, stages):
 
     def cell(v, count=False):
         if v is None:
-            return Text("—", style="dim")
+            return Text("-", style="dim")
         bad = (v > 0) if count else (v < 0)
         s = str(v) if count else f"{v:.3f}"
         return Text(s, style="red" if bad else "green")
@@ -501,7 +501,7 @@ def section_evolution(console, Table, Text, stages):
         t.add_row(*row)
     console.print(t)
     console.print("per-PVT WS = worst across that PVT's RC corners; "
-                  "— = corner not run at that stage "
+                  "- = corner not run at that stage "
                   "(mid-pnr STA runs the default corner only)")
 
 
@@ -526,7 +526,7 @@ def section_postsynth(console, Table, Text, stages):
         wp = parse_worst_path(st.dir / c, which="max")
         nv = st.metrics.get(f"timing__setup_vio__count__corner:{c}")
         if wp is None:
-            t.add_row(c, "—", "—", Text("—", style="dim"), fnum(nv))
+            t.add_row(c, "-", "-", Text("-", style="dim"), fnum(nv))
             continue
         style = "red" if wp["verdict"] == "VIOLATED" else "green"
         t.add_row(c, wp["start"], wp["end"],
@@ -682,9 +682,9 @@ def section_stats(console, Table, Text, m, run_dir):
     rows = [
         ("Die area", fmt_area(m.get("design__die__area"))),
         ("Core area", fmt_area(m.get("design__core__area"))),
-        ("Utilization", f"{util:.1f} %" if util is not None else "—"),
+        ("Utilization", f"{util:.1f} %" if util is not None else "-"),
         ("Instances", f"{m.get('design__instance__count'):,}"
-         if m.get("design__instance__count") is not None else "—"),
+         if m.get("design__instance__count") is not None else "-"),
         ("  sequential", fnum(m.get("design__instance__count__class:sequential_cell"))),
         ("  combinational", fnum(m.get("design__instance__count__class:multi_input_combinational_cell"))),
         ("  buffers (timing repair)", fnum(m.get("design__instance__count__class:timing_repair_buffer"))),
@@ -695,8 +695,8 @@ def section_stats(console, Table, Text, m, run_dir):
         ("  internal", fmt_power(m.get("power__internal__total"))),
         ("  switching", fmt_power(m.get("power__switching__total"))),
         ("  leakage", fmt_power(m.get("power__leakage__total"))),
-        ("Wirelength", f"{wirelength:,.0f} µm" if wirelength is not None else "—"),
-        ("Vias", f"{vias:,}" if vias is not None else "—"),
+        ("Wirelength", f"{wirelength:,.0f} µm" if wirelength is not None else "-"),
+        ("Vias", f"{vias:,}" if vias is not None else "-"),
         ("IR drop worst / avg", f"{fmt_volts(m.get('ir__drop__worst'))} / "
                                 f"{fmt_volts(m.get('ir__drop__avg'))}"),
         ("Clock skew setup / hold", f"{fnum(m.get('clock__skew__worst_setup'))} / "
@@ -770,7 +770,7 @@ def main():
     err_log = run_dir / "error.log"
     if err_log.is_file() and err_log.stat().st_size > 0:
         n_err = len(err_log.read_text().splitlines())
-        console.print(Text(f"error.log: {n_err} lines — check {err_log}", style="bold red"))
+        console.print(Text(f"error.log: {n_err} lines - check {err_log}", style="bold red"))
 
     stages = find_sta_stages(run_dir)
     stage = pick_stage(stages, args.stage)

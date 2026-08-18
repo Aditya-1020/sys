@@ -14,6 +14,7 @@ V_MODELS = $(wildcard $(RTL_DIR)/*.v)
 V_RTL = $(patsubst $(RTL_DIR)/%.sv, $(VERILOG_SV2V)/%.v, $(SV_RTL))
 
 PDK_ROOT ?= $(HOME)/eda/.volare
+RUN ?=
 
 TB_TOP ?= tb_top
 TB_SRC = $(TB_DIR)/$(TB_TOP).sv
@@ -41,7 +42,7 @@ GL_SNAP = $(TB_TOP)_gl_snap
 GL_VCD = $(GL_XSIM_DIR)/$(TB_TOP)_gl.vcd
 
 .PHONY: all venv cocotb xrun gl gl-waves vectors waves xrun-waves \
-	sv2v_rtl lint lib-last_run report pinreport sta-gui sta-shell sta-corners clean
+	sv2v_rtl lint lib-last_run report sta-gui sta-shell sta-corners clean
 
 all: cocotb
 
@@ -82,7 +83,7 @@ xrun-waves:
 venv:
 	$(VENV_PYTHON) -m venv .venv
 	.venv/bin/pip install --upgrade pip
-	.venv/bin/pip install cocotb==2.0.1 numpy
+	.venv/bin/pip install -r requirements.txt
 
 lint:
 	verilator --lint-only -Wall --timing $(SV_RTL) $(addprefix -v ,$(V_MODELS))
@@ -98,7 +99,6 @@ sta-shell:
 sta-corners:
 	scripts/stadebug $(RUN) -l
 
-RUN ?=
 LIBLANE := python3 scripts/liblane.py
 
 lib-last_run:
@@ -107,8 +107,6 @@ lib-last_run:
 report:
 	python3 scripts/runreport.py $(RUN) $(REPORT_ARGS)
 
-# pinreport:
-# 	openroad -exit -no_splash -python scripts/pinreport.py $(RUN) $(PINREPORT_ARGS)
 
 $(BUILD_DIR)/%.patched.v: $(GL_PDK_VERILOG)/%.v Makefile | $(BUILD_DIR)
 	sed -E -e 's:^([ \t]*`(endif|else))[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$$:\1 // \3:' \

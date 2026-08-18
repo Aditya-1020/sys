@@ -9,7 +9,7 @@ signed-off GDS with LibreLane / OpenROAD.
 
 | | |
 |---|---|
-| Clock | 5.00 ns — 200 MHz |
+| Clock | 5.00 ns (200 MHz) |
 | Setup / hold worst slack | +0.054 ns / +0.074 ns (`max_ss_100C_1v60`) |
 | Max slew / max cap | 0 / 0 |
 | Antenna / DRC / LVS | 0 / 0 / 0 |
@@ -22,7 +22,7 @@ Signoff is checked across all 9 corners.
 
 ## Design
 
-- **4×4 PE array** — Wallace-tree multipliers with carry-save adders; partial sums stay in
+- **4×4 PE array**: Wallace-tree multipliers with carry-save adders; partial sums stay in
   redundant form through the array and resolve once at the edge.
 - **AXI4 master** for DMA in and results out; **AXI4-Lite slave** for control/status registers.
 - **Two 64×32 SRAM macros** (`sram22_64x32m4w8`) as ping-pong tile buffers.
@@ -46,9 +46,21 @@ final_run/            # contains the final PnR database and reports
 ## Build
 
 ```bash
+make venv                     # .venv from requirements.txt
 make lint                     # verilator
 make cocotb                   # RTL simulation
 python flow.py --tag <name>   # full PnR
+```
+
+Two configs:
+
+| file | use |
+|---|---|
+| `config.json` | the design. Safe for a run from synthesis. |
+| `config_eco.json` | identical, plus the 45 closing ECO buffers. For resuming this database. |
+
+```bash
+python flow.py --tag <name> --config config_eco.json
 ```
 
 After a run:
@@ -59,7 +71,7 @@ make report RUN=<tag>         # run report
 make sta-corners RUN=<tag>    # per-corner timing
 ```
 
-`flow.py` is the entry point for PnR — **not** the `librelane` CLI, which silently drops
+`flow.py` is the entry point for PnR, **not** the `librelane` CLI, which silently drops
 the project's `Custom.*` steps.
 
 Useful flags:
@@ -70,13 +82,14 @@ python flow.py --tag <name> --rerun-from <Step> --from <Step>   # resume a run
 
 ## Flow customizations
 
-- **`Custom.CTS`** (`steps.py`, `scripts/openroad/cts.tcl`) — adds `-no_insertion_delay`
+- **`Custom.CTS`** (`steps.py`, `scripts/openroad/cts.tcl`) adds `-no_insertion_delay`
   and `-dont_use_dummy_load`, which stock LibreLane never passes. Stops CTS padding 2,781
   registers to line up with 2 slow SRAM clock pins.
-- **`Odb.InsertECOBuffers`** — inserted before detailed routing. The last 45 buffers that
-  close timing are listed in `config.json` under `INSERT_ECO_BUFFERS`.
+- **`Odb.InsertECOBuffers`** is inserted before detailed routing. The 45 buffers that close
+  timing live in `config_eco.json` under `INSERT_ECO_BUFFERS`. The step self-skips when the
+  key is absent, so `config.json` runs the flow without them.
 
-> **Note:** `INSERT_ECO_BUFFERS` targets tool-generated instance names from this specific
-> database. It is correct on a resumed run. Delete the block before starting a run from
-> synthesis, then re-derive the list from the new run's reports.
-
+> **Note:** those targets are tool-generated instance names (`place1154`, `clkbuf_leaf_78_clk`,
+> `_36560_`) belonging to this specific database. They are only valid on a resumed run. A run
+> from synthesis produces new names, so the list has to be re-derived from that run's
+> `violator_list.rpt` and `max.rpt`.
