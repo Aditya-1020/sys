@@ -57,7 +57,8 @@ module axi_lite_csr #(
 	localparam integer ADDR_LSB = $clog2(DATA_WIDTH)-3;
 	localparam integer NREG = 7; // 0x00 to 0x18
 	localparam integer SEL_W = $clog2(NREG);
-	localparam integer SKD_W = SEL_W + 1;
+	localparam integer DEC_W = SEL_W + 1; // {in_range, index} off the address pins
+	localparam integer SKD_W = NREG; // skid carries the one-hot, not the index
 
 	localparam integer IDX_CTRL = 0; // 0x00 RW
 	localparam integer IDX_STATUS = 1;// 0x04 RO
@@ -90,7 +91,7 @@ module axi_lite_csr #(
 		end
 	endfunction
 
-	function automatic logic [NREG-1:0] reg_onehot (input logic [SKD_W-1:0] skd);
+	function automatic logic [NREG-1:0] reg_onehot (input logic [DEC_W-1:0] skd);
 		reg_onehot = '0;
 		for (int i = 0; i < NREG; i++) begin
 			if (skd[SEL_W] && (skd[SEL_W-1:0] == SEL_W'(i))) begin
@@ -99,12 +100,15 @@ module axi_lite_csr #(
 		end
 	endfunction
 
-	wire [SKD_W-1:0] awdec = {~|i_s_axil_awaddr[ADDR_WIDTH-1:ADDR_LSB+SEL_W], i_s_axil_awaddr[ADDR_LSB+SEL_W-1:ADDR_LSB]};
-	wire [SKD_W-1:0] ardec = {~|i_s_axil_araddr[ADDR_WIDTH-1:ADDR_LSB+SEL_W], i_s_axil_araddr[ADDR_LSB+SEL_W-1:ADDR_LSB]};
+	wire [DEC_W-1:0] awidx = {~|i_s_axil_awaddr[ADDR_WIDTH-1:ADDR_LSB+SEL_W], i_s_axil_awaddr[ADDR_LSB+SEL_W-1:ADDR_LSB]};
+	wire [DEC_W-1:0] aridx = {~|i_s_axil_araddr[ADDR_WIDTH-1:ADDR_LSB+SEL_W], i_s_axil_araddr[ADDR_LSB+SEL_W-1:ADDR_LSB]};
+
+	wire [SKD_W-1:0] awdec = reg_onehot(awidx);
+	wire [SKD_W-1:0] ardec = reg_onehot(aridx);
 
 	wire [SKD_W-1:0] awskd_q, arskd_q;
-	wire [NREG-1:0] awskd_sel = reg_onehot(awskd_q);
-	wire [NREG-1:0] arskd_sel = reg_onehot(arskd_q);
+	wire [NREG-1:0] awskd_sel = awskd_q;
+	wire [NREG-1:0] arskd_sel = arskd_q;
 
 	skid_buffer #(
 		.N(SKD_W)

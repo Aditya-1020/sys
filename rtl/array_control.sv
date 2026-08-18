@@ -148,7 +148,21 @@ module array_control #(
 	end
 
 	assign o_cs_array = (current_state == FETCH);
-	assign o_addr_array = job_base_r + SRAM_ADDR_W'(rd_ptr_r);
+
+	logic [SRAM_ADDR_W-1:0] addr_r;
+	always_ff @(posedge clk) begin
+		if (!rstn) begin
+			addr_r <= '0;
+		end else if (tile_done) begin
+			addr_r <= last_job_r ? '0 : next_base[SRAM_ADDR_W-1:0];
+		end else if (current_state == FETCH) begin
+			addr_r <= addr_r + 1'b1;
+		end else begin
+			addr_r <= job_base_r;
+		end
+	end
+
+	assign o_addr_array = addr_r;
 
 	// pipelined read (c0=addr/cs, c1=dout from macro c2=valid and update out)
 	logic rd_vld_d1, rd_vld_r;

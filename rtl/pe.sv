@@ -150,10 +150,8 @@ module pe #(
 		mult_s_r <= mult_sum;
 		mult_c_r <= mult_carry;
 
-		if (i_enable) begin
-			acc_s <= signed'(acc_sum);
-			acc_c <= signed'(acc_carry);
-		end
+		acc_s <= i_enable ? signed'(acc_sum) : acc_s;
+		acc_c <= i_enable ? signed'(acc_carry) : acc_c;
 	end
 
 	assign o_psum_s = acc_s;

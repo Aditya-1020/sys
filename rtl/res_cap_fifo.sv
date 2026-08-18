@@ -77,7 +77,30 @@ module res_cap_fifo #(
 	logic [PTR_W-1:0] rd_ptr;
 	logic [BI_W-1:0] beat_idx;
 
-	wire [ROW_W-1:0] mem_rd = mem[rd_ptr];
+	// one-hot row select
+	logic [ROWS-1:0] rd_sel_r;
+	logic [ROW_W-1:0] mem_rd;
+
+	wire load_fire = (stg_n != 2'd2) && (level_r > LVL_W'(stg_n));
+
+	always_ff @(posedge clk) begin
+		if (!rstn) begin
+			rd_sel_r <= ROWS'(1);
+		end else if (load_fire) begin
+			rd_sel_r <= rd_sel_r[ROWS-1] ? ROWS'(1) : (rd_sel_r << 1);
+		end else begin
+			rd_sel_r <= ROWS'(1) << rd_ptr;
+		end
+	end
+
+	always_comb begin
+		mem_rd = '0;
+		for (int r = 0; r < ROWS; r++) begin
+			if (rd_sel_r[r]) begin
+				mem_rd = mem[r];
+			end
+		end
+	end
 
 	wire [ROW_W-1:0] stg_cur = rd_idx ? stg1_r : stg0_r;
 	wire [R1_BITS-1:0] stg_nxt_lo = rd_idx ? stg0_r[R1_BITS-1:0] : stg1_r[R1_BITS-1:0];
@@ -112,8 +135,6 @@ module res_cap_fifo #(
 	wire consume = head_valid_r && rd_en;
 	wire row_retire = transfer && beat_adv;
 
-	wire load_fire = (stg_n != 2'd2) && (level_r > LVL_W'(stg_n));
-
 	always_ff @(posedge clk) begin
 		if (!rstn) begin
 			wr_idx <= 1'b0;
@@ -125,7 +146,9 @@ module res_cap_fifo #(
 				wr_idx <= ~wr_idx;
 				rd_ptr <= (rd_ptr == PTR_W'(ROWS-1)) ? '0 : (rd_ptr + 1'b1);
 			end
-			if (row_retire) rd_idx <= ~rd_idx;
+			if (row_retire) begin
+				rd_idx <= ~rd_idx;
+			end
 			stg_n <= stg_n + {1'b0, load_fire} - {1'b0, row_retire};
 		end
 	end

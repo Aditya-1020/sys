@@ -35,27 +35,36 @@ module sys_ctrl (
 	output logic [31:0] o_csr_status
 );
 	import sys_pkg::*;
-
+	
+	logic go_q, store_q, auto_st_q, auto_fill_q;
 	logic go_r, store_r, auto_st_r, auto_fill_r;
 	always_ff @(posedge clk or negedge rstn) begin
 		if (!rstn) begin
+			go_q <= 1'b0;
+			store_q <= 1'b0;
+			auto_st_q <= 1'b0;
+			auto_fill_q <= 1'b0;
 			go_r <= 1'b0;
 			store_r <= 1'b0;
 			auto_st_r <= 1'b0;
 			auto_fill_r <= 1'b0;
 		end else begin
-			go_r <= csr_ctrl[CTRL_GO];
-			store_r <= csr_ctrl[CTRL_STORE];
-			auto_st_r <= csr_ctrl[CTRL_AUTO_ST];
-			auto_fill_r <= csr_ctrl[CTRL_AUTO_FILL];
+			go_q <= csr_ctrl[CTRL_GO];
+			store_q <= csr_ctrl[CTRL_STORE];
+			auto_st_q <= csr_ctrl[CTRL_AUTO_ST];
+			auto_fill_q <= csr_ctrl[CTRL_AUTO_FILL];
+			go_r <= go_q;
+			store_r <= store_q;
+			auto_st_r <= auto_st_q;
+			auto_fill_r <= auto_fill_q;
 		end
 	end
 
-	wire dma_start_manual = csr_ctrl[CTRL_GO] && !go_r;
-	wire wdma_start_manual = csr_ctrl[CTRL_STORE] && !store_r;
-	wire auto_st_en = csr_ctrl[CTRL_AUTO_ST];
+	wire dma_start_manual = go_q && !go_r;
+	wire wdma_start_manual = store_q && !store_r;
+	wire auto_st_en = auto_st_q;
 	wire auto_st_arm = auto_st_en && !auto_st_r;
-	wire auto_fill_en = csr_ctrl[CTRL_AUTO_FILL];
+	wire auto_fill_en = auto_fill_q;
 	wire auto_fill_arm = auto_fill_en && !auto_fill_r;
 
 	logic [31:0] dst_ptr_r;
@@ -134,25 +143,34 @@ module sys_ctrl (
 	assign o_wdma_start = wdma_start_manual || (auto_st_en && tile_ready && (!wdma_busy || wdma_last_beat));
 	assign o_wdma_dst = dst_ptr_r;
 
+	logic [31:0] csr_status_next;
 	always_comb begin
-		o_csr_status = '0;
-		o_csr_status[ST_DMA_BUSY] = dma_busy;
-		o_csr_status[ST_DMA_DONE] = dma_done;
-		o_csr_status[ST_DMA_ERR] = dma_err;
-		o_csr_status[ST_FILL_DONE] = dma_fill_done;
-		o_csr_status[ST_CTRL_BUSY] = arr_ctrl_busy;
-		o_csr_status[ST_ARRAY_BUSY] = array_busy;
-		o_csr_status[ST_ARRAY_DONE] = array_done;
-		o_csr_status[ST_PP_SEL] = ping_pong_sel;
-		o_csr_status[ST_W_VALID] = arr_ctrl_w_valid;
-		o_csr_status[ST_RES_VALID] = fifo_valid;
-		o_csr_status[ST_RES_OVF] = fifo_overflow;
-		o_csr_status[ST_WDMA_BUSY] = wdma_busy;
-		o_csr_status[ST_WDMA_DONE] = wdma_done;
-		o_csr_status[ST_WDMA_ERR] = wdma_err;
-		o_csr_status[ST_AF_BUSY] = auto_fill_pend;
-		o_csr_status[ST_LEVEL_LSB +: LEVEL_W] = fifo_level;
-		o_csr_status[ST_TILE_LSB +: 4] = tile_cnt_r;
+		csr_status_next = '0;
+		csr_status_next[ST_DMA_BUSY] = dma_busy;
+		csr_status_next[ST_DMA_DONE] = dma_done;
+		csr_status_next[ST_DMA_ERR] = dma_err;
+		csr_status_next[ST_FILL_DONE] = dma_fill_done;
+		csr_status_next[ST_CTRL_BUSY] = arr_ctrl_busy;
+		csr_status_next[ST_ARRAY_BUSY] = array_busy;
+		csr_status_next[ST_ARRAY_DONE] = array_done;
+		csr_status_next[ST_PP_SEL] = ping_pong_sel;
+		csr_status_next[ST_W_VALID] = arr_ctrl_w_valid;
+		csr_status_next[ST_RES_VALID] = fifo_valid;
+		csr_status_next[ST_RES_OVF] = fifo_overflow;
+		csr_status_next[ST_WDMA_BUSY] = wdma_busy;
+		csr_status_next[ST_WDMA_DONE] = wdma_done;
+		csr_status_next[ST_WDMA_ERR] = wdma_err;
+		csr_status_next[ST_AF_BUSY] = auto_fill_pend;
+		csr_status_next[ST_LEVEL_LSB +: LEVEL_W] = fifo_level;
+		csr_status_next[ST_TILE_LSB +: 4] = tile_cnt_r;
+	end
+
+	always_ff @(posedge clk or negedge rstn) begin
+		if (!rstn) begin
+			o_csr_status <= '0;
+		end else begin
+			o_csr_status <= csr_status_next;
+		end
 	end
 
 endmodule
